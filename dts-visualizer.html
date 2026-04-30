@@ -115,6 +115,7 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
   <button id="btn-expand-all" title="Expand all nodes">Expand All</button>
   <button id="btn-collapse" title="Collapse to 2 levels">Collapse</button>
   <button id="btn-phandles" title="Toggle phandle arrows">Phandles</button>
+  <button id="btn-export-png" title="Download the current diagram as a PNG image">Download PNG</button>
   <span id="stats"></span>
 </div>
 
@@ -1144,6 +1145,93 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ========== PNG EXPORT ==========
+// Serialize the rendered SVG (with inlined CSS so colors/fonts survive),
+// rasterize it onto a 2x canvas, and trigger a download.
+function downloadPNG() {
+  if (!svg || !treeGroup || !currentRoot) {
+    alert('Parse a DTS first, then try again.');
+    return;
+  }
+  const bbox = treeGroup.node().getBBox();
+  if (!isFinite(bbox.width) || bbox.width === 0 || bbox.height === 0) {
+    alert('Nothing to export.');
+    return;
+  }
+
+  const PADDING = 24;
+  const SCALE = 2; // 2x raster — crisp on retina + decent zoom-in tolerance
+  const exportW = Math.ceil(bbox.width + PADDING * 2);
+  const exportH = Math.ceil(bbox.height + PADDING * 2);
+  const viewBoxX = bbox.x - PADDING;
+  const viewBoxY = bbox.y - PADDING;
+
+  // Clone the live SVG so we can mutate it without affecting the on-screen view
+  const clone = svg.node().cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('width', exportW);
+  clone.setAttribute('height', exportH);
+  clone.setAttribute('viewBox', `${viewBoxX} ${viewBoxY} ${exportW} ${exportH}`);
+
+  // The on-screen <g> carries a pan/zoom transform — strip it so viewBox alone frames the content
+  const innerG = clone.querySelector('g');
+  if (innerG) innerG.removeAttribute('transform');
+
+  // Inline all <style> blocks so text/links keep their styling once detached from the page.
+  // Also force an explicit text font-family because body inheritance breaks when serialized.
+  const pageCSS = Array.from(document.querySelectorAll('style')).map(s => s.textContent).join('\n');
+  const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+  styleEl.textContent = `text { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }\n` + pageCSS;
+  clone.insertBefore(styleEl, clone.firstChild);
+
+  // Solid background matches the in-app dark theme and avoids transparent PNGs that look broken on light backgrounds
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('x', viewBoxX);
+  bg.setAttribute('y', viewBoxY);
+  bg.setAttribute('width', exportW);
+  bg.setAttribute('height', exportH);
+  bg.setAttribute('fill', '#0d1117');
+  clone.insertBefore(bg, styleEl.nextSibling);
+
+  const xml = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+  const svgUrl = URL.createObjectURL(svgBlob);
+
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = exportW * SCALE;
+    canvas.height = exportH * SCALE;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(SCALE, SCALE);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(svgUrl);
+
+    canvas.toBlob((pngBlob) => {
+      if (!pngBlob) { alert('PNG encode failed.'); return; }
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(pngBlob);
+      link.download = pngFilename();
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    }, 'image/png');
+  };
+  img.onerror = (e) => {
+    URL.revokeObjectURL(svgUrl);
+    console.error('PNG export failed:', e);
+    alert('PNG export failed — see console.');
+  };
+  img.src = svgUrl;
+}
+
+function pngFilename() {
+  const view = document.getElementById('view-select').value || 'dts';
+  const layout = (isComponentView ? layoutMode : 'tree');
+  return `dts-${view}-${layout}.png`;
+}
+
 // ========== SEARCH ==========
 function nodeMatchesQuery(node, q) {
   const name = (node.name || '').toLowerCase();
@@ -2096,6 +2184,10 @@ document.getElementById('btn-phandles').addEventListener('click', () => {
     const hierarchy = d3.hierarchy(currentRoot, d => d.children);
     drawPhandles(hierarchy.descendants());
   }
+});
+
+document.getElementById('btn-export-png').addEventListener('click', () => {
+  downloadPNG();
 });
 
 function refreshComponentView() {

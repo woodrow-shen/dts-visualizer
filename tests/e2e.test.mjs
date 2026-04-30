@@ -1,8 +1,9 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -192,6 +193,32 @@ test('clicking a block in block layout populates the properties panel', async ()
   assert.match(title, /cpu1_intc|interrupt-controller/);
   const selected = page.locator('.block.selected');
   assert.equal(await selected.count(), 1, 'exactly one block should be selected');
+});
+
+test('Download PNG button exports a valid PNG file with the expected name', async () => {
+  await page.selectOption('#view-select', 'cpu');
+  await page.selectOption('#layout-select', 'block');
+  await page.waitForFunction(() => document.querySelectorAll('.block').length > 0);
+
+  // Wait for any in-flight zoom transition to settle so getBBox is stable
+  await page.waitForTimeout(700);
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.click('#btn-export-png');
+  const download = await downloadPromise;
+
+  assert.equal(download.suggestedFilename(), 'dts-cpu-block.png');
+
+  const savePath = join(tmpdir(), `e2e-${Date.now()}-${download.suggestedFilename()}`);
+  await download.saveAs(savePath);
+
+  const buf = readFileSync(savePath);
+  // PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
+  assert.equal(buf[0], 0x89);
+  assert.equal(buf[1], 0x50);
+  assert.equal(buf[2], 0x4E);
+  assert.equal(buf[3], 0x47);
+  assert.ok(statSync(savePath).size > 5000, 'exported PNG should be more than a few KB');
 });
 
 test('block layout is hidden in DTS view and restored when re-entering a component view', async () => {
