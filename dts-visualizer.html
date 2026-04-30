@@ -1,0 +1,2160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DTS Visualizer</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+#toolbar { background: #161b22; border-bottom: 1px solid #30363d; padding: 8px 16px; display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+#toolbar button, #toolbar label { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+#toolbar button:hover, #toolbar label:hover { background: #30363d; }
+#search-input { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 6px 10px; border-radius: 6px; font-size: 13px; width: 220px; }
+#view-select { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 6px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+#view-select:hover { background: #30363d; }
+#search-input::placeholder { color: #484f58; }
+#stats { font-size: 12px; color: #8b949e; margin-left: auto; }
+#main { display: flex; flex: 1; overflow: hidden; }
+#input-panel { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+#input-panel.hidden { display: none; }
+#dts-textarea { width: 80%; max-width: 800px; height: 60%; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px; padding: 16px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; resize: none; }
+#input-panel .actions { display: flex; gap: 12px; }
+#input-panel button { background: #238636; color: #fff; border: none; padding: 10px 24px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+#input-panel button:hover { background: #2ea043; }
+#tree-container { flex: 1; overflow: hidden; position: relative; }
+#tree-container.hidden { display: none; }
+#tree-svg { width: 100%; height: 100%; }
+#props-panel { width: 360px; background: #161b22; border-left: 1px solid #30363d; overflow-y: auto; flex-shrink: 0; padding: 16px; }
+#props-panel.hidden { display: none; }
+#props-panel h3 { font-size: 14px; color: #58a6ff; margin-bottom: 12px; word-break: break-all; }
+#props-panel .prop-section { margin-bottom: 16px; }
+#props-panel .prop-section h4 { font-size: 12px; color: #8b949e; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; }
+.prop-row { display: flex; padding: 3px 0; font-size: 12px; border-bottom: 1px solid #21262d; }
+.prop-name { color: #7ee787; min-width: 140px; flex-shrink: 0; font-family: monospace; word-break: break-all; }
+.prop-value { color: #c9d1d9; font-family: monospace; word-break: break-all; overflow-wrap: anywhere; }
+.prop-value .phandle-ref { color: #d2a8ff; cursor: pointer; text-decoration: underline; }
+.prop-value .phandle-ref:hover { color: #bc8cff; }
+.node circle { stroke-width: 2px; cursor: pointer; }
+.node text { font-size: 12px; fill: #c9d1d9; cursor: pointer; }
+.node text.label-text { fill: #d2a8ff; font-size: 10px; font-style: italic; }
+.link { fill: none; stroke: #30363d; stroke-width: 1.5px; }
+.phandle-link { fill: none; stroke: #d2a8ff; stroke-width: 1px; stroke-dasharray: 4,3; opacity: 0.5; }
+.phandle-link:hover { opacity: 1; stroke-width: 2px; }
+.node.highlight circle { stroke: #f0883e !important; stroke-width: 3px; }
+.node.highlight text { fill: #f0883e !important; font-weight: bold; }
+.node.selected circle { stroke: #58a6ff !important; stroke-width: 3px; }
+.node.selected text { fill: #58a6ff !important; }
+.node.dimmed { opacity: 0.2; }
+#phandle-panel { position: absolute; bottom: 0; left: 0; right: 0; background: #161b22; border-top: 1px solid #30363d; max-height: 120px; overflow-y: auto; padding: 8px 16px; font-size: 12px; }
+#phandle-panel.hidden { display: none; }
+#phandle-panel .ref-item { display: inline-block; margin: 2px 6px 2px 0; padding: 2px 8px; background: #21262d; border-radius: 4px; cursor: pointer; color: #d2a8ff; }
+#phandle-panel .ref-item:hover { background: #30363d; }
+.color-cpu circle { fill: #f97583; stroke: #f97583; }
+.color-memory circle { fill: #79c0ff; stroke: #79c0ff; }
+.color-intc circle { fill: #ffa657; stroke: #ffa657; }
+.color-cache circle { fill: #7ee787; stroke: #7ee787; }
+.color-bus circle { fill: #d2a8ff; stroke: #d2a8ff; }
+.color-debug circle { fill: #8b949e; stroke: #8b949e; }
+.color-default circle { fill: #388bfd; stroke: #388bfd; }
+.color-root circle { fill: #f0883e; stroke: #f0883e; }
+.color-disabled circle { fill: #484f58; stroke: #484f58; }
+.color-clock circle { fill: #56d364; stroke: #56d364; }
+.color-power circle { fill: #ff7b72; stroke: #ff7b72; }
+.color-trace circle { fill: #a5d6ff; stroke: #a5d6ff; }
+.color-error circle { fill: #ffa198; stroke: #ffa198; }
+.color-wg circle { fill: #d2a8ff; stroke: #d2a8ff; }
+.block rect { fill-opacity: 0.08; stroke-width: 1.5px; cursor: pointer; transition: fill-opacity 0.15s; }
+.block.leaf rect { fill-opacity: 0.32; }
+.block:hover > rect { fill-opacity: 0.45; stroke-width: 2px; }
+.block.selected > rect { stroke: #58a6ff !important; stroke-width: 2.5px; }
+.block.highlight > rect { stroke: #f0883e !important; stroke-width: 2.5px; }
+.block.dimmed { opacity: 0.25; }
+.block-label { font-size: 12px; fill: #c9d1d9; font-weight: 600; pointer-events: none; }
+.block.leaf .block-label { font-weight: 500; font-size: 11.5px; }
+.block-sublabel { font-size: 10px; fill: #8b949e; pointer-events: none; font-style: italic; }
+.block-tag { font-size: 9.5px; fill: #d2a8ff; pointer-events: none; font-style: italic; }
+#layout-select { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 6px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+#layout-select:hover { background: #30363d; }
+#file-input { display: none; }
+#toolbar button.active { background: #388bfd; border-color: #388bfd; color: #fff; }
+.node text.comp-count { fill: #8b949e; font-size: 10px; }
+#legend { position: absolute; top: 8px; right: 380px; background: rgba(22,27,34,0.9); border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; font-size: 11px; display: flex; flex-wrap: wrap; gap: 6px 12px; max-width: 500px; }
+#legend.no-panel { right: 16px; }
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="btn-paste" title="Paste DTS text">Paste DTS</button>
+  <label for="file-input" title="Upload .dts file">Upload .dts</label>
+  <input type="file" id="file-input" accept=".dts,.dtsi,.dtb,.txt">
+  <span style="color:#30363d">|</span>
+  <input type="text" id="search-input" placeholder="Search nodes or compatible...">
+  <select id="view-select" title="Switch view">
+    <option value="dts">DTS Tree View</option>
+    <option value="power">Power Management</option>
+    <option value="ras">RAS (Error Handling)</option>
+    <option value="interrupt">Interrupt Subsystem</option>
+    <option value="cache">Cache Hierarchy</option>
+    <option value="trace">Trace &amp; Debug</option>
+    <option value="worldguard">WorldGuard (Security)</option>
+    <option value="cpu">CPU Subsystem</option>
+    <option value="peripheral">Peripherals</option>
+  </select>
+  <select id="layout-select" style="display:none;" title="Layout style for component views">
+    <option value="tree">Tree Layout</option>
+    <option value="block">Block Diagram</option>
+  </select>
+  <label id="wg-toggle-label" style="display:none; gap:4px; align-items:center; font-size:13px; cursor:pointer;" title="Show WorldGuard protection overlay on component views">
+    <input type="checkbox" id="wg-toggle"> WG Protection
+  </label>
+  <button id="btn-expand-all" title="Expand all nodes">Expand All</button>
+  <button id="btn-collapse" title="Collapse to 2 levels">Collapse</button>
+  <button id="btn-phandles" title="Toggle phandle arrows">Phandles</button>
+  <span id="stats"></span>
+</div>
+
+<div id="main">
+  <div id="input-panel">
+    <h2 style="color:#58a6ff">DTS Visualizer</h2>
+    <p style="color:#8b949e">Paste Device Tree Source or upload a .dts file</p>
+    <textarea id="dts-textarea" placeholder="Paste your DTS content here...&#10;&#10;/dts-v1/;&#10;/ {&#10;    compatible = &quot;vendor,board&quot;;&#10;    ...&#10;};"></textarea>
+    <div class="actions">
+      <button id="btn-parse">Parse & Visualize</button>
+    </div>
+  </div>
+
+  <div id="tree-container" class="hidden">
+    <svg id="tree-svg"></svg>
+    <div id="legend"></div>
+    <div id="phandle-panel" class="hidden">
+      <strong style="color:#8b949e">Phandle References:</strong>
+      <span id="phandle-list"></span>
+    </div>
+  </div>
+
+  <div id="props-panel" class="hidden">
+    <h3 id="props-title">Select a node</h3>
+    <div id="props-content"></div>
+  </div>
+</div>
+
+<script>
+// ========== DTS PARSER ==========
+class DTSParser {
+  constructor(src) {
+    this.src = src;
+    this.pos = 0;
+    this.labels = {};
+  }
+
+  parse() {
+    this.skipWhitespaceAndComments();
+    // Skip /dts-v1/; and /plugin/;
+    while (this.pos < this.src.length) {
+      if (this.src.startsWith('/dts-v1/', this.pos) || this.src.startsWith('/plugin/', this.pos)) {
+        this.skipUntil(';');
+        this.pos++; // skip ;
+        this.skipWhitespaceAndComments();
+      } else if (this.src.startsWith('/include/', this.pos) || this.src.startsWith('#include', this.pos)) {
+        this.skipUntil('\n');
+        this.skipWhitespaceAndComments();
+      } else {
+        break;
+      }
+    }
+    // Parse root node
+    const root = this.parseNode('/');
+    root.name = '/';
+    // Second pass: resolve label map
+    this.buildLabelMap(root);
+    return root;
+  }
+
+  buildLabelMap(node) {
+    if (node.label) {
+      this.labels[node.label] = node;
+    }
+    for (const child of node.children || []) {
+      this.buildLabelMap(child);
+    }
+  }
+
+  skipWhitespaceAndComments() {
+    while (this.pos < this.src.length) {
+      // Whitespace
+      if (/\s/.test(this.src[this.pos])) { this.pos++; continue; }
+      // Line comment
+      if (this.src.startsWith('//', this.pos)) {
+        this.skipUntil('\n');
+        continue;
+      }
+      // Block comment
+      if (this.src.startsWith('/*', this.pos)) {
+        const end = this.src.indexOf('*/', this.pos + 2);
+        this.pos = end === -1 ? this.src.length : end + 2;
+        continue;
+      }
+      break;
+    }
+  }
+
+  skipUntil(ch) {
+    const idx = this.src.indexOf(ch, this.pos);
+    this.pos = idx === -1 ? this.src.length : idx + 1;
+  }
+
+  peek() { return this.pos < this.src.length ? this.src[this.pos] : ''; }
+  advance() { return this.src[this.pos++]; }
+
+  parseNode(expectedName) {
+    this.skipWhitespaceAndComments();
+    let label = null;
+    let name = '';
+
+    // Try to read label: name or just name
+    // Could be: label: name@addr { or name@addr { or / {
+    if (expectedName === '/') {
+      // Root node
+      if (this.peek() === '/') { this.pos++; }
+      this.skipWhitespaceAndComments();
+      if (this.peek() === '{') { this.pos++; }
+      name = '/';
+    }
+
+    const node = { name, label, address: null, properties: [], children: [], _path: '' };
+    if (expectedName === '/') {
+      node.name = '/';
+    }
+
+    // Parse body
+    this.skipWhitespaceAndComments();
+    while (this.pos < this.src.length && this.peek() !== '}') {
+      this.skipWhitespaceAndComments();
+      if (this.peek() === '}' || this.pos >= this.src.length) break;
+
+      // Check for /delete-node/ or /delete-property/
+      if (this.src.startsWith('/delete-node/', this.pos) || this.src.startsWith('/delete-property/', this.pos)) {
+        this.skipUntil(';');
+        continue;
+      }
+      // Check for /include/ or #include
+      if (this.src.startsWith('/include/', this.pos) || this.src.startsWith('#include', this.pos)) {
+        this.skipUntil('\n');
+        continue;
+      }
+
+      // Read identifier (could be label: node or property)
+      const saved = this.pos;
+      const ident = this.readIdentifier();
+      this.skipWhitespaceAndComments();
+
+      if (this.peek() === ':') {
+        // It's a label
+        this.pos++; // skip :
+        this.skipWhitespaceAndComments();
+        const nodeName = this.readIdentifier();
+        this.skipWhitespaceAndComments();
+
+        if (this.peek() === '{') {
+          // Labeled child node
+          this.pos++; // skip {
+          const child = this.parseNodeBody(nodeName);
+          child.label = ident;
+          this.parseAddress(child);
+          node.children.push(child);
+        } else if (this.peek() === ';') {
+          // labeled boolean property? unlikely but handle
+          node.properties.push({ name: nodeName, value: 'true', type: 'boolean', label: ident });
+          this.pos++;
+        } else {
+          // property with label prefix (rare)
+          this.parsePropertyValue(nodeName, node, ident);
+        }
+      } else if (this.peek() === '{') {
+        // Unlabeled child node
+        this.pos++; // skip {
+        const child = this.parseNodeBody(ident);
+        this.parseAddress(child);
+        node.children.push(child);
+      } else if (this.peek() === '=' || this.peek() === ';') {
+        // Property
+        this.parsePropertyValue(ident, node);
+      } else {
+        // Unknown, skip to ; or }
+        if (this.pos === saved) this.pos++; // avoid infinite loop
+        else this.skipToPropertyEnd();
+      }
+    }
+    // Skip closing }
+    if (this.peek() === '}') this.pos++;
+    this.skipWhitespaceAndComments();
+    // Skip ;
+    if (this.peek() === ';') this.pos++;
+
+    return node;
+  }
+
+  parseNodeBody(name) {
+    const node = { name, label: null, address: null, properties: [], children: [], _path: '' };
+
+    this.skipWhitespaceAndComments();
+    while (this.pos < this.src.length && this.peek() !== '}') {
+      this.skipWhitespaceAndComments();
+      if (this.peek() === '}' || this.pos >= this.src.length) break;
+
+      if (this.src.startsWith('/delete-node/', this.pos) || this.src.startsWith('/delete-property/', this.pos)) {
+        this.skipUntil(';');
+        continue;
+      }
+      if (this.src.startsWith('/include/', this.pos) || this.src.startsWith('#include', this.pos)) {
+        this.skipUntil('\n');
+        continue;
+      }
+
+      const saved = this.pos;
+      const ident = this.readIdentifier();
+      this.skipWhitespaceAndComments();
+
+      if (this.peek() === ':') {
+        this.pos++;
+        this.skipWhitespaceAndComments();
+        const nodeName = this.readIdentifier();
+        this.skipWhitespaceAndComments();
+
+        if (this.peek() === '{') {
+          this.pos++;
+          const child = this.parseNodeBody(nodeName);
+          child.label = ident;
+          this.parseAddress(child);
+          node.children.push(child);
+        } else if (this.peek() === ';') {
+          node.properties.push({ name: nodeName, value: 'true', type: 'boolean', label: ident });
+          this.pos++;
+        } else {
+          this.parsePropertyValue(nodeName, node, ident);
+        }
+      } else if (this.peek() === '{') {
+        this.pos++;
+        const child = this.parseNodeBody(ident);
+        this.parseAddress(child);
+        node.children.push(child);
+      } else if (this.peek() === '=' || this.peek() === ';') {
+        this.parsePropertyValue(ident, node);
+      } else {
+        if (this.pos === saved) this.pos++;
+        else this.skipToPropertyEnd();
+      }
+    }
+
+    if (this.peek() === '}') this.pos++;
+    this.skipWhitespaceAndComments();
+    if (this.peek() === ';') this.pos++;
+
+    return node;
+  }
+
+  parseAddress(node) {
+    const parts = node.name.split('@');
+    if (parts.length === 2) {
+      node.name = parts[0];
+      node.address = parts[1];
+    }
+  }
+
+  readIdentifier() {
+    let id = '';
+    // DTS identifiers can contain: letters, digits, ,.-_+#?@
+    while (this.pos < this.src.length && /[a-zA-Z0-9,.\-_+#?@]/.test(this.src[this.pos])) {
+      id += this.src[this.pos++];
+    }
+    return id;
+  }
+
+  parsePropertyValue(name, node, label) {
+    if (this.peek() === ';') {
+      // Boolean property
+      node.properties.push({ name, value: 'true', type: 'boolean', label: label || null });
+      this.pos++;
+      return;
+    }
+
+    // Skip =
+    this.pos++;
+    this.skipWhitespaceAndComments();
+
+    let value = '';
+    let type = 'unknown';
+    let phandles = [];
+
+    // Collect the full value until ;
+    const valueStart = this.pos;
+    let depth = 0;
+    while (this.pos < this.src.length) {
+      const ch = this.src[this.pos];
+      if (ch === '<') depth++;
+      if (ch === '>') depth--;
+      if (ch === ';' && depth <= 0) break;
+      this.pos++;
+    }
+    value = this.src.substring(valueStart, this.pos).trim();
+    this.pos++; // skip ;
+
+    // Determine type
+    if (value.startsWith('"')) {
+      type = 'string';
+    } else if (value.startsWith('<')) {
+      type = 'cells';
+      // Extract phandle references
+      const refMatch = value.match(/&([a-zA-Z_][a-zA-Z0-9_]*)/g);
+      if (refMatch) {
+        phandles = refMatch.map(r => r.substring(1));
+        type = 'cells_with_phandle';
+      }
+    } else if (value.startsWith('[')) {
+      type = 'bytestring';
+    } else if (value.startsWith('&')) {
+      type = 'phandle_ref';
+      const refMatch = value.match(/&([a-zA-Z_][a-zA-Z0-9_]*)/g);
+      if (refMatch) phandles = refMatch.map(r => r.substring(1));
+    }
+
+    // Check for string lists: "a", "b", "c"
+    if (type === 'string' && value.includes('",')) {
+      type = 'stringlist';
+    }
+
+    node.properties.push({ name, value, type, phandles, label: label || null });
+  }
+
+  skipToPropertyEnd() {
+    let depth = 0;
+    while (this.pos < this.src.length) {
+      const ch = this.src[this.pos];
+      if (ch === '{') depth++;
+      if (ch === '}') { if (depth === 0) return; depth--; }
+      if (ch === ';' && depth === 0) { this.pos++; return; }
+      this.pos++;
+    }
+  }
+}
+
+// ========== NODE CLASSIFICATION ==========
+function classifyNode(node) {
+  const compat = node.properties.find(p => p.name === 'compatible');
+  const compatVal = compat ? compat.value.toLowerCase() : '';
+  const name = (node.name || '').toLowerCase();
+  const status = node.properties.find(p => p.name === 'status');
+  const statusVal = status ? status.value.replace(/"/g, '') : '';
+
+  if (statusVal === 'disabled') return 'disabled';
+  if (node.name === '/') return 'root';
+  if (name === 'cpus' || name === 'cpu' || name.startsWith('cpu@') || compatVal.includes('riscv')) return 'cpu';
+  if (name === 'memory' || name.startsWith('memory@') || compatVal.includes('memory') || compatVal.includes('sram') || compatVal.includes('maskrom') || compatVal.includes('mig')) return 'memory';
+  if (name.includes('interrupt-controller') || name.includes('intc') || compatVal.includes('intc') || compatVal.includes('aplic') || compatVal.includes('imsic') || compatVal.includes('clint')) return 'intc';
+  if (name.includes('cache') || compatVal.includes('cache') || name.includes('ec-slice')) return 'cache';
+  if (compatVal.includes('simple-bus') || name === 'soc' || name.includes('axi') || compatVal.includes('sys-port')) return 'bus';
+  if (name.includes('debug') || compatVal.includes('debug')) return 'debug';
+  if (name.includes('clock') || compatVal.includes('clock')) return 'clock';
+  if (name.includes('power') || name.includes('pmc') || name.includes('tmc') || name.includes('cmc') || name.includes('smc') || compatVal.includes('pmc') || compatVal.includes('tmc') || compatVal.includes('cmc') || compatVal.includes('smc') || name.includes('idle-state') || compatVal.includes('idle-state') || compatVal.includes('domain-idle-state')) return 'power';
+  if (name.includes('trace') || compatVal.includes('trace')) return 'trace';
+  if (name.includes('error') || compatVal.includes('error')) return 'error';
+  if (name.includes('wg') || compatVal.includes('wg') || name === 'worldguard') return 'wg';
+  return 'default';
+}
+
+const colorLabels = {
+  root: { color: '#f0883e', label: 'Root' },
+  cpu: { color: '#f97583', label: 'CPU' },
+  memory: { color: '#79c0ff', label: 'Memory' },
+  intc: { color: '#ffa657', label: 'Interrupt' },
+  cache: { color: '#7ee787', label: 'Cache' },
+  bus: { color: '#d2a8ff', label: 'Bus/SoC' },
+  debug: { color: '#8b949e', label: 'Debug' },
+  clock: { color: '#56d364', label: 'Clock' },
+  power: { color: '#ff7b72', label: 'Power' },
+  trace: { color: '#a5d6ff', label: 'Trace' },
+  error: { color: '#ffa198', label: 'Error/RAS' },
+  wg: { color: '#d2a8ff', label: 'WorldGuard' },
+  disabled: { color: '#484f58', label: 'Disabled' },
+  'default': { color: '#388bfd', label: 'Other' },
+};
+
+// ========== GLOBALS ==========
+let parsedTree = null;
+let labelMap = {};
+let allPhandles = [];
+let showPhandles = false;
+let selectedNode = null;
+let treeGroup, svg, zoom;
+let totalNodes = 0;
+
+// ========== TREE VISUALIZATION ==========
+function buildD3Data(node, path, depth) {
+  const fullName = node.address ? `${node.name}@${node.address}` : node.name;
+  const d3node = {
+    name: fullName,
+    label: node.label,
+    nodeType: classifyNode(node),
+    properties: node.properties,
+    children: [],
+    _collapsed: depth >= 2,
+    _path: path,
+    _origChildren: null,
+  };
+  totalNodes++;
+
+  for (const child of node.children || []) {
+    const childPath = path === '/' ? `/${child.address ? child.name + '@' + child.address : child.name}` : `${path}/${child.address ? child.name + '@' + child.address : child.name}`;
+    d3node.children.push(buildD3Data(child, childPath, depth + 1));
+  }
+
+  // Collapse deep nodes by default
+  if (depth >= 2 && d3node.children.length > 0) {
+    d3node._origChildren = d3node.children;
+    d3node.children = null;
+  }
+
+  return d3node;
+}
+
+function collectPhandles(node) {
+  for (const prop of node.properties || []) {
+    if (prop.phandles && prop.phandles.length > 0) {
+      for (const ref of prop.phandles) {
+        allPhandles.push({ from: node._path, fromLabel: node.label, propName: prop.name, target: ref });
+      }
+    }
+  }
+  for (const child of (node.children || node._origChildren || [])) {
+    collectPhandles(child);
+  }
+}
+
+function renderTree(root) {
+  const container = document.getElementById('tree-container');
+  container.classList.remove('hidden');
+  document.getElementById('input-panel').classList.add('hidden');
+  document.getElementById('props-panel').classList.remove('hidden');
+
+  svg = d3.select('#tree-svg');
+  svg.selectAll('*').remove();
+
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+
+  svg.attr('width', width).attr('height', height);
+
+  const g = svg.append('g');
+  treeGroup = g;
+
+  zoom = d3.zoom()
+    .scaleExtent([0.1, 4])
+    .on('zoom', (e) => g.attr('transform', e.transform));
+  svg.call(zoom);
+
+  // Phandle links group (drawn first, behind nodes)
+  g.append('g').attr('class', 'phandle-links');
+
+  updateTree(root);
+
+  // Initial zoom to fit
+  setTimeout(() => zoomToFit(), 100);
+
+  // Update stats
+  const visibleCount = d3.selectAll('.node').size();
+  document.getElementById('stats').textContent = `${totalNodes} nodes total | ${visibleCount} visible`;
+}
+
+function updateTree(source) {
+  const container = document.getElementById('tree-container');
+  const vertical = isComponentView;
+
+  const treeLayout = vertical
+    ? d3.tree().nodeSize([160, 80])
+    : d3.tree().nodeSize([22, 280]);
+  const hierarchy = d3.hierarchy(source, d => d.children);
+  treeLayout(hierarchy);
+
+  const nodes = hierarchy.descendants();
+  const links = hierarchy.links();
+
+  const node = treeGroup.selectAll('.node')
+    .data(nodes, d => d.data._path);
+
+  const nodeEnter = node.enter().append('g')
+    .attr('class', d => `node color-${d.data.nodeType}`)
+    .attr('transform', d => vertical ? `translate(${d.x},${d.y})` : `translate(${d.y},${d.x})`)
+    .on('click', (e, d) => {
+      e.stopPropagation();
+      if (e.shiftKey || e.metaKey) {
+        toggleNode(d.data, source);
+      } else {
+        selectNode(d);
+      }
+    })
+    .on('dblclick', (e, d) => {
+      e.stopPropagation();
+      toggleNode(d.data, source);
+    });
+
+  nodeEnter.append('circle')
+    .attr('r', d => d.data.children || d.data._origChildren ? 5 : 3.5);
+
+  if (vertical) {
+    // Vertical: text below node, centered
+    nodeEnter.append('text')
+      .attr('dy', '1.6em')
+      .attr('x', 0)
+      .attr('text-anchor', 'middle')
+      .text(d => {
+        let t = d.data.name;
+        if (d.data._origChildren && !d.data.children) t += ` [+${d.data._origChildren.length}]`;
+        return t.length > 24 ? t.substring(0, 22) + '..' : t;
+      })
+      .append('title')
+      .text(d => d.data.label ? `${d.data.label}: ${d.data.name}` : d.data.name);
+
+    nodeEnter.filter(d => d.data.label)
+      .append('text')
+      .attr('class', 'label-text')
+      .attr('dy', '-0.8em')
+      .attr('x', 0)
+      .attr('text-anchor', 'middle')
+      .text(d => d.data.label);
+  } else {
+    // Horizontal: text left/right of node
+    nodeEnter.append('text')
+      .attr('dy', '0.35em')
+      .attr('x', d => (d.data.children || d.data._origChildren) ? -10 : 10)
+      .attr('text-anchor', d => (d.data.children || d.data._origChildren) ? 'end' : 'start')
+      .text(d => {
+        let t = d.data.name;
+        if (d.data._origChildren && !d.data.children) t += ` [+${d.data._origChildren.length}]`;
+        return t;
+      });
+
+    nodeEnter.filter(d => d.data.label)
+      .append('text')
+      .attr('class', 'label-text')
+      .attr('dy', '-0.8em')
+      .attr('x', d => (d.data.children || d.data._origChildren) ? -10 : 10)
+      .attr('text-anchor', d => (d.data.children || d.data._origChildren) ? 'end' : 'start')
+      .text(d => d.data.label);
+  }
+
+  const nodeUpdate = nodeEnter.merge(node);
+  nodeUpdate.attr('transform', d => vertical ? `translate(${d.x},${d.y})` : `translate(${d.y},${d.x})`);
+
+  node.exit().remove();
+
+  // Links
+  const linkGen = vertical
+    ? d3.linkVertical().x(d => d.x).y(d => d.y)
+    : d3.linkHorizontal().x(d => d.y).y(d => d.x);
+
+  const link = treeGroup.selectAll('.link')
+    .data(links, d => d.target.data._path);
+
+  link.enter().insert('path', '.node')
+    .attr('class', 'link')
+    .attr('d', linkGen);
+
+  link.attr('d', linkGen);
+  link.exit().remove();
+
+  // Phandle links
+  if (showPhandles) drawPhandles(nodes);
+  else treeGroup.select('.phandle-links').selectAll('*').remove();
+
+  // Update stats
+  const visibleCount = nodes.length;
+  document.getElementById('stats').textContent = `${totalNodes} nodes total | ${visibleCount} visible`;
+}
+
+function toggleNode(d, root) {
+  if (d.children) {
+    d._origChildren = d.children;
+    d.children = null;
+  } else if (d._origChildren) {
+    d.children = d._origChildren;
+    d._origChildren = null;
+  }
+  treeGroup.selectAll('.node').remove();
+  treeGroup.selectAll('.link').remove();
+  treeGroup.select('.phandle-links').selectAll('*').remove();
+  updateTree(root);
+}
+
+function expandAll(node) {
+  if (node._origChildren) {
+    node.children = node._origChildren;
+    node._origChildren = null;
+  }
+  if (node.children) {
+    node.children.forEach(c => expandAll(c));
+  }
+}
+
+function collapseToDepth(node, depth, maxDepth) {
+  if (depth >= maxDepth && node.children && node.children.length > 0) {
+    node._origChildren = node.children;
+    node.children = null;
+  } else if (node.children) {
+    node.children.forEach(c => collapseToDepth(c, depth + 1, maxDepth));
+  }
+  // Also check _origChildren in case partially expanded
+  if (node._origChildren) {
+    node._origChildren.forEach(c => collapseToDepth(c, depth + 1, maxDepth));
+  }
+}
+
+function selectNode(d) {
+  d3.selectAll('.node').classed('selected', false);
+  d3.select(d3.select('.node').nodes()[0]).classed('selected', false); // clear
+  // Find the DOM node
+  d3.selectAll('.node').each(function(nd) {
+    if (nd === d) d3.select(this).classed('selected', true);
+  });
+  selectedNode = d;
+  showProperties(d.data);
+}
+
+function showProperties(data) {
+  const title = document.getElementById('props-title');
+  const content = document.getElementById('props-content');
+
+  let displayName = data.name;
+  if (data.label) displayName = `${data.label}: ${displayName}`;
+  title.textContent = displayName;
+  title.title = data._path;
+
+  let html = '';
+
+  // Node info
+  html += '<div class="prop-section"><h4>Node Info</h4>';
+  html += `<div class="prop-row"><span class="prop-name">path</span><span class="prop-value">${data._path}</span></div>`;
+  if (data.label) html += `<div class="prop-row"><span class="prop-name">label</span><span class="prop-value" style="color:#d2a8ff">${data.label}</span></div>`;
+  html += `<div class="prop-row"><span class="prop-name">type</span><span class="prop-value">${data.nodeType}</span></div>`;
+  const childCount = (data.children || data._origChildren || []).length;
+  html += `<div class="prop-row"><span class="prop-name">children</span><span class="prop-value">${childCount}</span></div>`;
+  html += '</div>';
+
+  // Properties
+  if (data.properties.length > 0) {
+    html += '<div class="prop-section"><h4>Properties (' + data.properties.length + ')</h4>';
+    for (const prop of data.properties) {
+      let val = prop.value;
+      // Truncate very long values
+      const maxLen = 200;
+      let truncated = false;
+      if (val.length > maxLen) {
+        truncated = true;
+      }
+
+      // Highlight phandle refs
+      if (prop.phandles && prop.phandles.length > 0) {
+        let displayVal = truncated ? val.substring(0, maxLen) + '...' : val;
+        for (const ref of prop.phandles) {
+          displayVal = displayVal.replace(
+            new RegExp('&' + ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+            `<span class="phandle-ref" data-target="${ref}" title="Click to navigate to ${ref}">&amp;${ref}</span>`
+          );
+        }
+        val = displayVal;
+      } else {
+        val = truncated ? escapeHtml(val.substring(0, maxLen)) + '...' : escapeHtml(val);
+      }
+
+      html += `<div class="prop-row"><span class="prop-name">${escapeHtml(prop.name)}</span><span class="prop-value">${val}</span></div>`;
+    }
+    html += '</div>';
+  }
+
+  // Phandle references from this node
+  const refs = allPhandles.filter(p => p.from === data._path);
+  if (refs.length > 0) {
+    html += '<div class="prop-section"><h4>References Out (' + refs.length + ')</h4>';
+    for (const ref of refs) {
+      html += `<div class="prop-row"><span class="prop-name">${escapeHtml(ref.propName)}</span><span class="prop-value"><span class="phandle-ref" data-target="${ref.target}">&amp;${ref.target}</span></span></div>`;
+    }
+    html += '</div>';
+  }
+
+  // Incoming phandle references
+  if (data.label) {
+    const incoming = allPhandles.filter(p => p.target === data.label);
+    if (incoming.length > 0) {
+      html += '<div class="prop-section"><h4>Referenced By (' + incoming.length + ')</h4>';
+      for (const ref of incoming) {
+        html += `<div class="prop-row"><span class="prop-name">${escapeHtml(ref.propName)}</span><span class="prop-value" style="color:#8b949e">${escapeHtml(ref.from)}</span></div>`;
+      }
+      html += '</div>';
+    }
+  }
+
+  content.innerHTML = html;
+
+  // Attach phandle click handlers
+  content.querySelectorAll('.phandle-ref').forEach(el => {
+    el.addEventListener('click', () => {
+      const target = el.dataset.target;
+      navigateToLabel(target);
+    });
+  });
+}
+
+function navigateToLabel(label) {
+  const targetNode = findNodeByLabel(currentRoot, label);
+  if (!targetNode) return;
+
+  // Expand path to target
+  expandPathTo(currentRoot, targetNode._path);
+
+  // Re-render
+  treeGroup.selectAll('.node').remove();
+  treeGroup.selectAll('.link').remove();
+  treeGroup.select('.phandle-links').selectAll('*').remove();
+  updateTree(currentRoot);
+
+  // Find and select the node
+  setTimeout(() => {
+    d3.selectAll('.node').each(function(d) {
+      if (d.data._path === targetNode._path) {
+        d3.selectAll('.node').classed('selected', false).classed('highlight', false);
+        d3.select(this).classed('selected', true).classed('highlight', true);
+        selectedNode = d;
+        showProperties(d.data);
+
+        // Scroll to node — coordinate mapping depends on layout direction
+        const transform = d3.zoomTransform(svg.node());
+        const x = isComponentView ? d.x : d.y;
+        const y = isComponentView ? d.y : d.x;
+        const containerWidth = document.getElementById('tree-container').clientWidth;
+        const containerHeight = document.getElementById('tree-container').clientHeight;
+        const targetX = isComponentView ? containerWidth / 2 : containerWidth / 3;
+        const targetY = isComponentView ? containerHeight / 3 : containerHeight / 2;
+        svg.transition().duration(500).call(
+          zoom.transform,
+          d3.zoomIdentity.translate(targetX - x * transform.k, targetY - y * transform.k).scale(transform.k)
+        );
+      }
+    });
+  }, 50);
+}
+
+function findNodeByLabel(node, label) {
+  if (node.label === label) return node;
+  const children = node.children || node._origChildren || [];
+  for (const child of children) {
+    const found = findNodeByLabel(child, label);
+    if (found) return found;
+  }
+  return null;
+}
+
+function expandPathTo(root, targetPath) {
+  const parts = targetPath.split('/').filter(Boolean);
+  let current = root;
+  let currentPath = '/';
+
+  for (const part of parts) {
+    if (current._origChildren && !current.children) {
+      current.children = current._origChildren;
+      current._origChildren = null;
+    }
+    if (!current.children) break;
+    const next = current.children.find(c => {
+      const cName = c.name;
+      return cName === part;
+    });
+    if (next) {
+      current = next;
+      currentPath = currentPath === '/' ? `/${part}` : `${currentPath}/${part}`;
+    } else break;
+  }
+}
+
+function drawPhandles(visibleNodes) {
+  const linkGroup = treeGroup.select('.phandle-links');
+  linkGroup.selectAll('*').remove();
+
+  const nodeMap = {};
+  visibleNodes.forEach(n => {
+    if (n.data.label) nodeMap[n.data.label] = n;
+  });
+
+  // Collect visible phandle refs
+  const visiblePaths = new Set(visibleNodes.map(n => n.data._path));
+  const visibleRefs = allPhandles.filter(p => visiblePaths.has(p.from) && nodeMap[p.target]);
+
+  for (const ref of visibleRefs) {
+    const sourceNode = visibleNodes.find(n => n.data._path === ref.from);
+    const targetNode = nodeMap[ref.target];
+    if (!sourceNode || !targetNode) continue;
+
+    linkGroup.append('path')
+      .attr('class', 'phandle-link')
+      .attr('d', () => {
+        if (isComponentView) {
+          const sx = sourceNode.x, sy = sourceNode.y;
+          const tx = targetNode.x, ty = targetNode.y;
+          const my = (sy + ty) / 2;
+          return `M${sx},${sy} C${sx},${my} ${tx},${my} ${tx},${ty}`;
+        } else {
+          const sx = sourceNode.y, sy = sourceNode.x;
+          const tx = targetNode.y, ty = targetNode.x;
+          const mx = (sx + tx) / 2;
+          return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
+        }
+      })
+      .append('title')
+      .text(`${ref.from} --${ref.propName}--> &${ref.target}`);
+  }
+}
+
+// ========== BLOCK DIAGRAM LAYOUT ==========
+const BLOCK_OPTS = {
+  padding: 14,
+  gap: 12,
+  headerHeight: 28,
+  leafW: 180,
+  leafH: 60,
+  maxRowWidth: 1500,
+};
+
+// Recursively compute _w, _h, and child _relX/_relY (relative to this node's top-left).
+function layoutBlock(node, opts) {
+  const kids = node.children || node._origChildren || [];
+
+  if (kids.length === 0) {
+    node._w = opts.leafW;
+    node._h = opts.leafH;
+    return;
+  }
+
+  for (const k of kids) layoutBlock(k, opts);
+
+  // Pack kids into rows; new row when current row + next kid would exceed maxRowWidth
+  const rows = [];
+  let curRow = [];
+  let curRowW = 0;
+  for (const k of kids) {
+    const addW = (curRow.length > 0 ? opts.gap : 0) + k._w;
+    if (curRow.length > 0 && curRowW + addW > opts.maxRowWidth) {
+      rows.push(curRow);
+      curRow = [];
+      curRowW = 0;
+    }
+    curRow.push(k);
+    curRowW += (curRow.length > 1 ? opts.gap : 0) + k._w;
+  }
+  if (curRow.length) rows.push(curRow);
+
+  const rowWidths = rows.map(r => r.reduce((s, k, i) => s + k._w + (i > 0 ? opts.gap : 0), 0));
+  const rowHeights = rows.map(r => Math.max(...r.map(k => k._h)));
+
+  const innerW = Math.max(...rowWidths);
+  const innerH = rowHeights.reduce((a, b) => a + b, 0) + Math.max(0, rows.length - 1) * opts.gap;
+
+  node._w = innerW + opts.padding * 2;
+  node._h = innerH + opts.padding * 2 + opts.headerHeight;
+
+  let yCursor = opts.padding + opts.headerHeight;
+  rows.forEach((row, ri) => {
+    let xCursor = opts.padding;
+    row.forEach(k => {
+      k._relX = xCursor;
+      k._relY = yCursor;
+      xCursor += k._w + opts.gap;
+    });
+    yCursor += rowHeights[ri] + opts.gap;
+  });
+}
+
+function renderBlockNode(node, parentX, parentY, group) {
+  const x = parentX + (node._relX || 0);
+  const y = parentY + (node._relY || 0);
+  node._absX = x;
+  node._absY = y;
+
+  const kids = node.children || node._origChildren || [];
+  const isLeaf = kids.length === 0;
+  const colorInfo = colorLabels[node.nodeType] || colorLabels.default;
+
+  const g = group.append('g')
+    .datum(node)
+    .attr('class', `block color-${node.nodeType} ${isLeaf ? 'leaf' : 'container'}`)
+    .attr('data-path', node._path)
+    .on('click', (e) => {
+      e.stopPropagation();
+      d3.selectAll('.block, .node').classed('selected', false);
+      d3.select(e.currentTarget).classed('selected', true);
+      selectedNode = { data: node };
+      showProperties(node);
+    });
+
+  g.append('rect')
+    .attr('x', x).attr('y', y)
+    .attr('width', node._w).attr('height', node._h)
+    .attr('rx', 6).attr('ry', 6)
+    .attr('fill', colorInfo.color)
+    .attr('stroke', colorInfo.color);
+
+  // Header label (truncate if too wide for block)
+  const maxChars = Math.max(8, Math.floor(node._w / 7));
+  let label = node.name;
+  if (label.length > maxChars) label = label.substring(0, maxChars - 1) + '…';
+  g.append('text')
+    .attr('class', 'block-label')
+    .attr('x', x + 10)
+    .attr('y', y + 18)
+    .text(label)
+    .append('title')
+    .text(node.label ? `${node.label}: ${node.name}` : node.name);
+
+  // Sublabel: phandle label, or compatible (leaf only), or child count
+  const compatProp = (node.properties || []).find(p => p.name === 'compatible');
+  const compatStr = compatProp ? compatProp.value.replace(/"/g, '').split(',')[0].trim() : '';
+  if (isLeaf && compatStr) {
+    let sub = compatStr;
+    if (sub.length > maxChars) sub = sub.substring(0, maxChars - 1) + '…';
+    g.append('text')
+      .attr('class', 'block-sublabel')
+      .attr('x', x + 10)
+      .attr('y', y + 36)
+      .text(sub);
+  }
+  if (node.label) {
+    g.append('text')
+      .attr('class', 'block-tag')
+      .attr('x', x + node._w - 10)
+      .attr('y', y + 18)
+      .attr('text-anchor', 'end')
+      .text('&' + node.label);
+  }
+
+  for (const k of kids) renderBlockNode(k, x, y, group);
+}
+
+function renderBlockView(root) {
+  layoutBlock(root, BLOCK_OPTS);
+
+  treeGroup.selectAll('.node, .block, .link').remove();
+  treeGroup.select('.phandle-links').selectAll('*').remove();
+
+  renderBlockNode(root, 0, 0, treeGroup);
+
+  if (showPhandles) drawPhandlesBlock();
+
+  const visibleCount = treeGroup.selectAll('.block').size();
+  document.getElementById('stats').textContent = `${totalNodes} nodes total | ${visibleCount} blocks`;
+}
+
+// Pick edge anchor points based on relative position of two blocks.
+function blockEdgeAnchors(src, tgt) {
+  const scx = src._absX + src._w / 2;
+  const scy = src._absY + src._h / 2;
+  const tcx = tgt._absX + tgt._w / 2;
+  const tcy = tgt._absY + tgt._h / 2;
+  const dx = tcx - scx;
+  const dy = tcy - scy;
+
+  let sx, sy, tx, ty;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    if (dx >= 0) { sx = src._absX + src._w; sy = scy; tx = tgt._absX;          ty = tcy; }
+    else         { sx = src._absX;          sy = scy; tx = tgt._absX + tgt._w; ty = tcy; }
+  } else {
+    if (dy >= 0) { sx = scx; sy = src._absY + src._h; tx = tcx; ty = tgt._absY;          }
+    else         { sx = scx; sy = src._absY;          tx = tcx; ty = tgt._absY + tgt._h; }
+  }
+  return { sx, sy, tx, ty };
+}
+
+function drawPhandlesBlock() {
+  const linkGroup = treeGroup.select('.phandle-links');
+  linkGroup.selectAll('*').remove();
+
+  const blocksByPath = {};
+  const blocksByLabel = {};
+  treeGroup.selectAll('.block').each(function(d) {
+    if (!d) return;
+    if (d._path) blocksByPath[d._path] = d;
+    if (d.label) blocksByLabel[d.label] = d;
+  });
+
+  for (const ref of allPhandles) {
+    const src = blocksByPath[ref.from];
+    const tgt = blocksByLabel[ref.target];
+    if (!src || !tgt || src === tgt) continue;
+    const { sx, sy, tx, ty } = blockEdgeAnchors(src, tgt);
+    const mx = (sx + tx) / 2;
+    linkGroup.append('path')
+      .attr('class', 'phandle-link')
+      .attr('d', `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`)
+      .append('title')
+      .text(`${ref.from} --${ref.propName}--> &${ref.target}`);
+  }
+}
+
+function zoomToFit() {
+  const bounds = treeGroup.node().getBBox();
+  const container = document.getElementById('tree-container');
+  const fullWidth = container.clientWidth;
+  const fullHeight = container.clientHeight;
+  const width = bounds.width;
+  const height = bounds.height;
+  const midX = bounds.x + width / 2;
+  const midY = bounds.y + height / 2;
+  const scale = Math.min(0.9 * fullWidth / width, 0.9 * fullHeight / height, 1.5);
+  const translate = [fullWidth / 2 - scale * midX, fullHeight / 2 - scale * midY];
+
+  svg.transition().duration(500).call(
+    zoom.transform,
+    d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale)
+  );
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ========== SEARCH ==========
+function nodeMatchesQuery(node, q) {
+  const name = (node.name || '').toLowerCase();
+  const label = (node.label || '').toLowerCase();
+  const compat = (node.properties.find(p => p.name === 'compatible') || {}).value || '';
+  const status = (node.properties.find(p => p.name === 'status') || {}).value || '';
+  const regName = (node.properties.find(p => p.name === 'reg-names') || {}).value || '';
+  const path = (node._path || '').toLowerCase();
+  return name.includes(q) || label.includes(q) || compat.toLowerCase().includes(q)
+    || status.toLowerCase().includes(q) || regName.toLowerCase().includes(q) || path.includes(q);
+}
+
+function findMatchingNodes(node, q, results) {
+  if (nodeMatchesQuery(node, q)) results.push(node);
+  for (const child of (node.children || node._origChildren || [])) {
+    findMatchingNodes(child, q, results);
+  }
+}
+
+function expandToNode(root, targetPath) {
+  const parts = targetPath.split('/').filter(Boolean);
+  let current = root;
+  for (const part of parts) {
+    if (current._origChildren && !current.children) {
+      current.children = current._origChildren;
+      current._origChildren = null;
+    }
+    if (!current.children) break;
+    const next = current.children.find(c => c.name === part);
+    if (next) current = next;
+    else break;
+  }
+}
+
+let searchTimeout = null;
+function searchNodes(query) {
+  if (!currentRoot) return;
+  if (!query) {
+    d3.selectAll('.node, .block').classed('highlight', false).classed('dimmed', false);
+    document.getElementById('stats').textContent = `${totalNodes} nodes total`;
+    return;
+  }
+  const q = query.toLowerCase();
+
+  // Search ALL nodes including collapsed ones
+  const matches = [];
+  findMatchingNodes(currentRoot, q, matches);
+
+  if (matches.length === 0) {
+    d3.selectAll('.node, .block').classed('highlight', false).classed('dimmed', true);
+    document.getElementById('stats').textContent = `0 matches / ${totalNodes} nodes`;
+    return;
+  }
+
+  const isBlockMode = layoutMode === 'block' && isComponentView;
+
+  // In tree mode, auto-expand paths to all matching nodes (block mode shows everything already).
+  if (!isBlockMode) {
+    let needsRedraw = false;
+    for (const m of matches) {
+      const visible = d3.selectAll('.node').data().some(d => d.data._path === m._path);
+      if (!visible) {
+        expandToNode(currentRoot, m._path);
+        needsRedraw = true;
+      }
+    }
+    if (needsRedraw) {
+      treeGroup.selectAll('.node').remove();
+      treeGroup.selectAll('.link').remove();
+      treeGroup.select('.phandle-links').selectAll('*').remove();
+      updateTree(currentRoot);
+    }
+  }
+
+  // Highlight matches, dim others — works for both .node (tree) and .block (block diagram)
+  const matchPaths = new Set(matches.map(m => m._path));
+  d3.selectAll('.node').each(function(d) {
+    const isMatch = matchPaths.has(d.data._path);
+    d3.select(this).classed('highlight', isMatch).classed('dimmed', !isMatch);
+  });
+  d3.selectAll('.block').each(function(d) {
+    const isMatch = d && matchPaths.has(d._path);
+    d3.select(this).classed('highlight', isMatch).classed('dimmed', !isMatch);
+  });
+
+  document.getElementById('stats').textContent = `${matches.length} matches / ${totalNodes} nodes`;
+}
+
+// ========== LEGEND ==========
+function renderLegend() {
+  const legend = document.getElementById('legend');
+  const usedTypes = new Set();
+  function collectTypes(node) {
+    usedTypes.add(node.nodeType);
+    (node.children || node._origChildren || []).forEach(collectTypes);
+  }
+  collectTypes(currentRoot);
+
+  legend.innerHTML = '';
+  for (const [type, info] of Object.entries(colorLabels)) {
+    if (!usedTypes.has(type)) continue;
+    const item = document.createElement('span');
+    item.className = 'legend-item';
+    item.innerHTML = `<span class="legend-dot" style="background:${info.color}"></span>${info.label}`;
+    legend.appendChild(item);
+  }
+}
+
+// ========== COMPONENT VIEW (Relationship-based hierarchy) ==========
+
+function flattenAllNodes(node, result) {
+  result.push(node);
+  for (const child of (node.children || node._origChildren || [])) {
+    flattenAllNodes(child, result);
+  }
+}
+
+// Helper: get phandle targets from a property
+function getPhandleTargets(node, propName) {
+  const prop = node.properties.find(p => p.name === propName);
+  if (!prop || !prop.phandles) return [];
+  return prop.phandles;
+}
+
+// Build a label -> node map from ALL flattened d3 nodes
+function buildLabelToNodeMap(root) {
+  const all = [];
+  flattenAllNodes(root, all);
+  const map = {};
+  for (const n of all) {
+    if (n.label) map[n.label] = n;
+  }
+  return map;
+}
+
+// Clone a d3 node for component view (shallow clone, no children)
+function cloneNode(node) {
+  return {
+    name: node.label ? `${node.label}: ${node.name}` : node.name,
+    label: node.label,
+    nodeType: node.nodeType,
+    properties: node.properties,
+    children: [],
+    _origChildren: null,
+    _path: node._path,
+    _origLabel: node.label,
+  };
+}
+
+// Build hierarchy from child->parent phandle relationship
+// parentProp: property name on child that points to parent (e.g. "ras-parents", "power-domains")
+function buildHierarchyByPhandle(nodes, labelMap, parentProp, rootTitle, rootType) {
+  const nodesByLabel = {};
+  const clones = {};
+
+  // Create clones for all nodes
+  for (const n of nodes) {
+    const c = cloneNode(n);
+    clones[n._path] = c;
+    if (n.label) nodesByLabel[n.label] = c;
+  }
+
+  const attached = new Set();
+
+  // Link children to parents
+  for (const n of nodes) {
+    const targets = getPhandleTargets(n, parentProp);
+    for (const t of targets) {
+      if (nodesByLabel[t]) {
+        nodesByLabel[t].children.push(clones[n._path]);
+        attached.add(n._path);
+      }
+    }
+  }
+
+  // Find roots (nodes not attached as children)
+  const roots = nodes.filter(n => !attached.has(n._path)).map(n => clones[n._path]);
+
+  const root = {
+    name: rootTitle,
+    label: null,
+    nodeType: rootType,
+    properties: [],
+    children: roots,
+    _origChildren: null,
+    _path: `/__comp__/${rootTitle}`,
+  };
+  return root;
+}
+
+// Build hierarchy for Power Management:
+// PMC -> subsystemMC -> ClusterMC -> TileMC -> power-domains -> idle-states
+function buildPowerTree(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+  const labelMap = {};
+  all.forEach(n => { if (n.label) labelMap[n.label] = n; });
+
+  // Collect power-related nodes
+  const powerNodes = all.filter(n => {
+    const nm = n.name.toLowerCase();
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    return c.includes('tmc') || c.includes('cmc') || c.includes('smc') || c.includes('pmc')
+      || nm.includes('power-domain') || nm === 'idle-states' || nm === 'domain-idle-states'
+      || c.includes('idle-state') || c.includes('domain-idle-state')
+      || nm.startsWith('tilemc') || nm.startsWith('clustermc') || nm.startsWith('subsystemmc')
+      || nm === 'pmc';
+  });
+
+  // Build hierarchy: sifive,power-controller points child -> parent controller
+  const clones = {};
+  const byLabel = {};
+  for (const n of powerNodes) {
+    const c = cloneNode(n);
+    clones[n._path] = c;
+    if (n.label) byLabel[n.label] = c;
+  }
+
+  const attached = new Set();
+
+  // Link by sifive,power-controller (child -> parent)
+  for (const n of powerNodes) {
+    const targets = getPhandleTargets(n, 'sifive,power-controller');
+    for (const t of targets) {
+      if (byLabel[t] && clones[n._path] !== byLabel[t]) {
+        byLabel[t].children.push(clones[n._path]);
+        attached.add(n._path);
+      }
+    }
+  }
+
+  // Link by power-domains (child -> parent domain)
+  for (const n of powerNodes) {
+    const targets = getPhandleTargets(n, 'power-domains');
+    for (const t of targets) {
+      if (byLabel[t] && clones[n._path] !== byLabel[t] && !attached.has(n._path)) {
+        byLabel[t].children.push(clones[n._path]);
+        attached.add(n._path);
+      }
+    }
+  }
+
+  // Also attach CPUs to their power domains
+  const cpuNodes = all.filter(n => {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    return n.properties.some(p => p.name === 'device_type' && p.value.includes('cpu'));
+  });
+  for (const cpu of cpuNodes) {
+    const targets = getPhandleTargets(cpu, 'power-domains');
+    for (const t of targets) {
+      if (byLabel[t]) {
+        const cc = cloneNode(cpu);
+        cc.nodeType = 'cpu';
+        byLabel[t].children.push(cc);
+      }
+    }
+  }
+
+  // Link idle states to power domains via domain-idle-states phandle
+  for (const n of powerNodes) {
+    const prop = n.properties.find(p => p.name === 'domain-idle-states');
+    if (prop && prop.phandles) {
+      for (const t of prop.phandles) {
+        if (byLabel[t] && clones[n._path]) {
+          // idle state is child of the power domain
+          if (!clones[n._path].children.some(c => c._origLabel === t)) {
+            const idleClone = byLabel[t];
+            if (idleClone && !attached.has(idleClone._path)) {
+              // Don't move, just reference
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const roots = powerNodes.filter(n => !attached.has(n._path)).map(n => clones[n._path]);
+
+  return {
+    name: 'Power Management Hierarchy',
+    label: null, nodeType: 'power',
+    properties: [{ name: 'description', value: '"PMC -> SubsystemMC -> ClusterMC -> TileMC -> Power Domains -> CPUs"', type: 'string', phandles: [] }],
+    children: roots, _origChildren: null,
+    _path: '/__comp__/power',
+  };
+}
+
+// Build RAS hierarchy: ras-parents chain
+function buildRASTree(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+
+  const rasNodes = all.filter(n => {
+    const nm = n.name.toLowerCase();
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    return c.includes('errormapping') || c.includes('errorsummary') || c.includes('errorbank')
+      || c.includes('errormanager')
+      || nm.includes('ras_info') || nm.includes('bank-supplemental');
+  });
+
+  // ras-parents: child points to parent
+  return buildHierarchyByPhandle(rasNodes, buildLabelToNodeMap(dtsRoot),
+    'ras-parents', 'RAS Error Handling Hierarchy', 'error');
+}
+
+// Build Interrupt hierarchy
+function buildInterruptTree(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+
+  const intcNodes = all.filter(n => {
+    const nm = n.name.toLowerCase();
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    return c.includes('aplic') || c.includes('imsic') || c.includes('clint')
+      || c.includes('cpu-intc') || c.includes('rnmi-intc')
+      || c.includes('interrupt-manager')
+      || nm.includes('interrupt-controller');
+  });
+
+  const clones = {};
+  const byLabel = {};
+  for (const n of intcNodes) {
+    const c = cloneNode(n);
+    clones[n._path] = c;
+    if (n.label) byLabel[n.label] = c;
+  }
+
+  const attached = new Set();
+
+  // APLIC: riscv,children points parent -> child
+  for (const n of intcNodes) {
+    const prop = n.properties.find(p => p.name === 'riscv,children');
+    if (prop && prop.phandles) {
+      for (const t of prop.phandles) {
+        if (byLabel[t]) {
+          clones[n._path].children.push(byLabel[t]);
+          attached.add(byLabel[t]._path);
+        }
+      }
+    }
+  }
+
+  // IMSIC: msi-parent on APLIC -> IMSIC
+  for (const n of intcNodes) {
+    const prop = n.properties.find(p => p.name === 'msi-parent');
+    if (prop && prop.phandles) {
+      for (const t of prop.phandles) {
+        if (byLabel[t] && !attached.has(byLabel[t]._path)) {
+          clones[n._path].children.push(byLabel[t]);
+          attached.add(byLabel[t]._path);
+        }
+      }
+    }
+  }
+
+  // IMSIC subnodes: find by DTS parent path
+  for (const n of intcNodes) {
+    if (!n.label) continue;
+    const parentPath = n._path.replace(/\/[^/]+$/, '');
+    const parent = intcNodes.find(p => p._path === parentPath);
+    if (parent && clones[parent._path] && !attached.has(n._path)) {
+      clones[parent._path].children.push(clones[n._path]);
+      attached.add(n._path);
+    }
+  }
+
+  // CPU intc: attach to a virtual "Per-CPU" group
+  const cpuIntcs = intcNodes.filter(n => {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    return (c.includes('cpu-intc') || c.includes('rnmi-intc')) && !attached.has(n._path);
+  });
+  if (cpuIntcs.length > 0) {
+    const cpuIntcGroup = {
+      name: `Per-CPU Interrupt Controllers (${cpuIntcs.length})`,
+      label: null, nodeType: 'intc', properties: [],
+      children: cpuIntcs.map(n => { attached.add(n._path); return clones[n._path]; }),
+      _origChildren: null, _path: '/__comp__/interrupt/cpu-intc',
+    };
+    // Put at beginning
+    const roots = intcNodes.filter(n => !attached.has(n._path)).map(n => clones[n._path]);
+    roots.unshift(cpuIntcGroup);
+    return {
+      name: 'Interrupt Subsystem Hierarchy',
+      label: null, nodeType: 'intc',
+      properties: [{ name: 'description', value: '"APLIC -> IMSIC (per-CPU), CLINT, CPU INTC"', type: 'string', phandles: [] }],
+      children: roots, _origChildren: null,
+      _path: '/__comp__/interrupt',
+    };
+  }
+
+  const roots = intcNodes.filter(n => !attached.has(n._path)).map(n => clones[n._path]);
+  return {
+    name: 'Interrupt Subsystem Hierarchy',
+    label: null, nodeType: 'intc',
+    properties: [],
+    children: roots, _origChildren: null,
+    _path: '/__comp__/interrupt',
+  };
+}
+
+// Build Cache hierarchy: next-level-cache chain
+function buildCacheTree(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+
+  const cacheNodes = all.filter(n => {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    const nm = n.name.toLowerCase();
+    return c.includes('extensiblecache') || nm.includes('ec-slice')
+      || (n.properties.some(p => p.name === 'cache-level'));
+  });
+
+  // Also include CPUs that have next-level-cache
+  const cpuNodes = all.filter(n => {
+    return n.properties.some(p => p.name === 'device_type' && p.value.includes('cpu'))
+      && n.properties.some(p => p.name === 'next-level-cache');
+  });
+
+  const allCacheRelated = [...cpuNodes, ...cacheNodes];
+  const clones = {};
+  const byLabel = {};
+  for (const n of allCacheRelated) {
+    const c = cloneNode(n);
+    if (cpuNodes.includes(n)) c.nodeType = 'cpu';
+    clones[n._path] = c;
+    if (n.label) byLabel[n.label] = c;
+  }
+
+  const attached = new Set();
+
+  // next-level-cache: points to the next level (child -> parent in cache hierarchy)
+  // We reverse: cache is parent of the node pointing to it
+  for (const n of allCacheRelated) {
+    const targets = getPhandleTargets(n, 'next-level-cache');
+    for (const t of targets) {
+      if (byLabel[t] && clones[n._path] !== byLabel[t]) {
+        byLabel[t].children.push(clones[n._path]);
+        attached.add(n._path);
+      }
+    }
+  }
+
+  // DTS parent-child for ec-slices inside cache-controller
+  for (const n of cacheNodes) {
+    const parentPath = n._path.replace(/\/[^/]+$/, '');
+    const parent = cacheNodes.find(p => p._path === parentPath);
+    if (parent && clones[parent._path] && clones[n._path] && !attached.has(n._path) && parent !== n) {
+      clones[parent._path].children.push(clones[n._path]);
+      attached.add(n._path);
+    }
+  }
+
+  const roots = allCacheRelated.filter(n => !attached.has(n._path)).map(n => clones[n._path]);
+
+  return {
+    name: 'Cache Hierarchy',
+    label: null, nodeType: 'cache',
+    properties: [{ name: 'description', value: '"CPU -> L2 Cache -> L3 Cache (via next-level-cache), with cache slices"', type: 'string', phandles: [] }],
+    children: roots, _origChildren: null,
+    _path: '/__comp__/cache',
+  };
+}
+
+// Build Trace hierarchy: remote-endpoint chain (encoder -> funnel -> funnel)
+function buildTraceTree(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+
+  const traceNodes = all.filter(n => {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    return c.includes('trace-encoder') || c.includes('trace-funnel');
+  });
+
+  // Trace: encoder out-port -> funnel in-port via remote-endpoint phandle
+  // We need to find the endpoint connections
+  // Approach: funnel has in-ports with endpoints that reference encoder out-ports
+  // Build: funnel is parent of encoder
+
+  const clones = {};
+  const byLabel = {};
+  for (const n of traceNodes) {
+    const c = cloneNode(n);
+    clones[n._path] = c;
+    if (n.label) byLabel[n.label] = c;
+  }
+
+  // Find endpoint relationships from allPhandles
+  // Look for remote-endpoint phandles in out-ports -> they point to funnel in-ports
+  const endpointNodes = all.filter(n => n.name === 'endpoint');
+  const endpointByLabel = {};
+  for (const ep of endpointNodes) {
+    if (ep.label) endpointByLabel[ep.label] = ep;
+  }
+
+  const attached = new Set();
+
+  // For each trace encoder, find its out-port endpoint, follow remote-endpoint to funnel
+  for (const encoder of traceNodes) {
+    const c = (encoder.properties.find(p => p.name === 'compatible') || {}).value || '';
+    if (!c.includes('trace-encoder')) continue;
+
+    // Find endpoints in this encoder's subtree
+    const encoderEndpoints = all.filter(n => n._path.startsWith(encoder._path + '/') && n.name === 'endpoint');
+    for (const ep of encoderEndpoints) {
+      const remoteTargets = getPhandleTargets(ep, 'remote-endpoint');
+      for (const rt of remoteTargets) {
+        // Find which trace node owns this remote endpoint
+        const remoteEp = endpointByLabel[rt];
+        if (!remoteEp) continue;
+        // Walk up to find the trace-funnel parent
+        for (const funnel of traceNodes) {
+          if (remoteEp._path.startsWith(funnel._path + '/')) {
+            if (clones[funnel._path] && clones[encoder._path]) {
+              clones[funnel._path].children.push(clones[encoder._path]);
+              attached.add(encoder._path);
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Funnel -> funnel connections
+  for (const funnel of traceNodes) {
+    const c = (funnel.properties.find(p => p.name === 'compatible') || {}).value || '';
+    if (!c.includes('trace-funnel')) continue;
+    const funnelEndpoints = all.filter(n => n._path.startsWith(funnel._path + '/out-ports') && n.name === 'endpoint');
+    for (const ep of funnelEndpoints) {
+      const remoteTargets = getPhandleTargets(ep, 'remote-endpoint');
+      for (const rt of remoteTargets) {
+        const remoteEp = endpointByLabel[rt];
+        if (!remoteEp) continue;
+        for (const parentFunnel of traceNodes) {
+          if (parentFunnel._path !== funnel._path && remoteEp._path.startsWith(parentFunnel._path + '/')) {
+            if (clones[parentFunnel._path] && clones[funnel._path] && !attached.has(funnel._path)) {
+              clones[parentFunnel._path].children.push(clones[funnel._path]);
+              attached.add(funnel._path);
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Also attach CPUs to encoders via sifive,cpu phandle
+  for (const encoder of traceNodes) {
+    const cpuTargets = getPhandleTargets(encoder, 'sifive,cpu');
+    for (const t of cpuTargets) {
+      const cpuNode = all.find(n => n.label === t);
+      if (cpuNode && clones[encoder._path]) {
+        const cc = cloneNode(cpuNode);
+        cc.nodeType = 'cpu';
+        cc.children = null;
+        clones[encoder._path].children.push(cc);
+      }
+    }
+  }
+
+  const roots = traceNodes.filter(n => !attached.has(n._path)).map(n => clones[n._path]);
+
+  return {
+    name: 'Trace Subsystem Hierarchy',
+    label: null, nodeType: 'trace',
+    properties: [{ name: 'description', value: '"CPU -> Trace Encoder -> Trace Funnel (cluster) -> Trace Funnel (top)"', type: 'string', phandles: [] }],
+    children: roots, _origChildren: null,
+    _path: '/__comp__/trace',
+  };
+}
+
+// Build WorldGuard hierarchy: wgchecker subordinates -> target nodes
+function buildWorldGuardTree(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+
+  const wgNodes = all.filter(n => {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    const nm = n.name.toLowerCase();
+    return c.includes('wgchecker') || c.includes('wgmarker') || c.includes('wgcpu')
+      || nm === 'worldguard' || nm === 'worldguard_cfg';
+  });
+
+  const clones = {};
+  const byLabel = {};
+  for (const n of wgNodes) {
+    const c = cloneNode(n);
+    clones[n._path] = c;
+    if (n.label) byLabel[n.label] = c;
+  }
+
+  // wgchecker: sifive,subordinates -> protected nodes (these are NOT wg nodes, show as references)
+  for (const n of wgNodes) {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    if (!c.includes('wgchecker')) continue;
+    const subProp = n.properties.find(p => p.name === 'sifive,subordinates');
+    if (subProp && subProp.phandles) {
+      for (const t of subProp.phandles) {
+        const targetNode = all.find(nd => nd.label === t);
+        if (targetNode) {
+          const ref = cloneNode(targetNode);
+          ref.name = `[protects] ${ref.name}`;
+          ref.children = null;
+          clones[n._path].children.push(ref);
+        }
+      }
+    }
+  }
+
+  // wgmarker: sifive,ancestors -> origin nodes
+  for (const n of wgNodes) {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    if (!c.includes('wgmarker')) continue;
+    const ancProp = n.properties.find(p => p.name === 'sifive,ancestors');
+    if (ancProp && ancProp.phandles) {
+      for (const t of ancProp.phandles) {
+        const targetNode = all.find(nd => nd.label === t);
+        if (targetNode) {
+          const ref = cloneNode(targetNode);
+          ref.name = `[marks for] ${ref.name}`;
+          ref.children = null;
+          clones[n._path].children.push(ref);
+        }
+      }
+    }
+  }
+
+  // Group by type
+  const checkers = wgNodes.filter(n => { const c = (n.properties.find(p => p.name === 'compatible') || {}).value || ''; return c.includes('wgchecker'); });
+  const markers = wgNodes.filter(n => { const c = (n.properties.find(p => p.name === 'compatible') || {}).value || ''; return c.includes('wgmarker'); });
+  const others = wgNodes.filter(n => { const c = (n.properties.find(p => p.name === 'compatible') || {}).value || ''; return !c.includes('wgchecker') && !c.includes('wgmarker'); });
+
+  const children = [];
+  if (checkers.length) {
+    children.push({
+      name: `WG Checkers (${checkers.length})`, label: null, nodeType: 'wg', properties: [],
+      children: checkers.map(n => clones[n._path]), _origChildren: null,
+      _path: '/__comp__/wg/checkers',
+    });
+  }
+  if (markers.length) {
+    children.push({
+      name: `WG Markers (${markers.length})`, label: null, nodeType: 'wg', properties: [],
+      children: markers.map(n => clones[n._path]), _origChildren: null,
+      _path: '/__comp__/wg/markers',
+    });
+  }
+  if (others.length) {
+    children.push({
+      name: `WG Config (${others.length})`, label: null, nodeType: 'wg', properties: [],
+      children: others.map(n => clones[n._path]), _origChildren: null,
+      _path: '/__comp__/wg/config',
+    });
+  }
+
+  return {
+    name: 'WorldGuard Security Hierarchy',
+    label: null, nodeType: 'wg',
+    properties: [{ name: 'description', value: '"WG Checkers -> protected subordinates, WG Markers -> origin nodes"', type: 'string', phandles: [] }],
+    children, _origChildren: null,
+    _path: '/__comp__/worldguard',
+  };
+}
+
+// Build WG protection map: label -> list of wgchecker names that protect it
+function buildWGProtectionMap(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+  const protMap = {}; // label -> [{checkerName, checkerLabel, checkerPath}]
+
+  const checkers = all.filter(n => {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    return c.includes('wgchecker');
+  });
+
+  for (const chk of checkers) {
+    const subProp = chk.properties.find(p => p.name === 'sifive,subordinates');
+    if (!subProp || !subProp.phandles) continue;
+    for (const t of subProp.phandles) {
+      if (!protMap[t]) protMap[t] = [];
+      protMap[t].push({
+        checkerName: chk.label ? `${chk.label}: ${chk.name}` : chk.name,
+        checkerLabel: chk.label,
+        checkerPath: chk._path,
+      });
+    }
+  }
+  return protMap;
+}
+
+// Annotate a component tree with WG protection nodes
+function overlayWGProtection(node, protMap) {
+  if (!node) return;
+  // Check if this node's original label is protected
+  const label = node._origLabel || node.label;
+  if (label && protMap[label]) {
+    if (!node.children) {
+      if (node._origChildren) {
+        // node is collapsed — add to _origChildren
+      } else {
+        node.children = [];
+      }
+    }
+    const targetArr = node.children || node._origChildren;
+    if (targetArr) {
+      for (const wg of protMap[label]) {
+        // Avoid duplicates
+        const wgPath = `${node._path}/__wg__/${wg.checkerLabel || wg.checkerName}`;
+        if (!targetArr.find(c => c._path === wgPath)) {
+          targetArr.push({
+            name: `[WG] ${wg.checkerName}`,
+            label: null,
+            nodeType: 'wg',
+            properties: [{ name: 'role', value: '"WorldGuard Checker protecting this node"', type: 'string', phandles: [] }],
+            children: null,
+            _origChildren: null,
+            _path: wgPath,
+            _isWGOverlay: true,
+          });
+        }
+      }
+    }
+  }
+  // Recurse
+  for (const child of (node.children || [])) {
+    overlayWGProtection(child, protMap);
+  }
+  for (const child of (node._origChildren || [])) {
+    overlayWGProtection(child, protMap);
+  }
+}
+
+// Remove WG overlay nodes from a tree
+function removeWGOverlay(node) {
+  if (!node) return;
+  if (node.children) {
+    node.children = node.children.filter(c => !c._isWGOverlay);
+    node.children.forEach(c => removeWGOverlay(c));
+  }
+  if (node._origChildren) {
+    node._origChildren = node._origChildren.filter(c => !c._isWGOverlay);
+    node._origChildren.forEach(c => removeWGOverlay(c));
+  }
+}
+
+// Build CPU subsystem tree
+function buildCPUTree(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+
+  // Find the cpus node and return its DTS subtree as-is
+  const cpusNode = all.find(n => n.name === 'cpus' && n._path === '/cpus');
+  if (!cpusNode) {
+    return { name: 'CPU Subsystem', label: null, nodeType: 'cpu', properties: [], children: [], _origChildren: null, _path: '/__comp__/cpu' };
+  }
+
+  // Deep clone the cpus subtree
+  function deepClone(node) {
+    const c = cloneNode(node);
+    const kids = node.children || node._origChildren || [];
+    c.children = kids.map(k => deepClone(k));
+    return c;
+  }
+
+  return deepClone(cpusNode);
+}
+
+// Build Peripheral tree
+function buildPeripheralTree(dtsRoot) {
+  const all = [];
+  flattenAllNodes(dtsRoot, all);
+
+  const groups = {
+    'UART / Serial': [],
+    'SPI': [],
+    'DMA': [],
+    'Ethernet': [],
+    'Security (TRNG/Auth)': [],
+    'Other': [],
+  };
+
+  for (const n of all) {
+    const c = (n.properties.find(p => p.name === 'compatible') || {}).value || '';
+    const nm = n.name.toLowerCase();
+    if (c.includes('uart') || nm.includes('serial@')) groups['UART / Serial'].push(n);
+    else if (c.includes('spi') && !c.includes('mmc-spi')) groups['SPI'].push(n);
+    else if (c.includes('pdma') || (c.includes('dma') && !c.includes('shared-dma'))) groups['DMA'].push(n);
+    else if (c.includes('ethernet') || c.includes('axi-ethernet') || c.includes('axidma') || c.includes('ethernet-phy') || nm.includes('mdio') || nm.includes('phy@')) groups['Ethernet'].push(n);
+    else if (c.includes('trng') || c.includes('authentication')) groups['Security (TRNG/Auth)'].push(n);
+    else if (c.includes('mmc')) groups['SPI'].push(n); // MMC under SPI
+  }
+
+  const children = [];
+  for (const [gname, nodes] of Object.entries(groups)) {
+    if (nodes.length === 0) continue;
+
+    // For Ethernet, build sub-hierarchy from DTS tree
+    if (gname === 'Ethernet') {
+      const ethNodes = nodes;
+      const clones = {};
+      for (const n of ethNodes) {
+        clones[n._path] = cloneNode(n);
+      }
+      const attached = new Set();
+      // Attach children by DTS path
+      for (const n of ethNodes) {
+        const parentPath = n._path.replace(/\/[^/]+$/, '');
+        const parent = ethNodes.find(p => p._path === parentPath);
+        if (parent && parent !== n) {
+          clones[parent._path].children.push(clones[n._path]);
+          attached.add(n._path);
+        }
+      }
+      const roots = ethNodes.filter(n => !attached.has(n._path)).map(n => clones[n._path]);
+      children.push({
+        name: `${gname} (${nodes.length})`, label: null, nodeType: 'default', properties: [],
+        children: roots, _origChildren: null, _path: `/__comp__/periph/${gname}`,
+      });
+    } else {
+      children.push({
+        name: `${gname} (${nodes.length})`, label: null, nodeType: 'default', properties: [],
+        children: nodes.map(n => cloneNode(n)), _origChildren: null,
+        _path: `/__comp__/periph/${gname}`,
+      });
+    }
+  }
+
+  return {
+    name: 'Peripherals',
+    label: null, nodeType: 'default',
+    properties: [],
+    children, _origChildren: null,
+    _path: '/__comp__/peripheral',
+  };
+}
+
+const componentBuilders = {
+  power: buildPowerTree,
+  ras: buildRASTree,
+  interrupt: buildInterruptTree,
+  cache: buildCacheTree,
+  trace: buildTraceTree,
+  worldguard: buildWorldGuardTree,
+  cpu: buildCPUTree,
+  peripheral: buildPeripheralTree,
+};
+
+let isComponentView = false;
+let dtsTreeRoot = null;
+let layoutMode = 'tree'; // 'tree' | 'block'
+
+// ========== MAIN ==========
+let currentRoot = null;
+
+function doParse(src) {
+  try {
+    const parser = new DTSParser(src);
+    parsedTree = parser.parse();
+    labelMap = parser.labels;
+    totalNodes = 0;
+    allPhandles = [];
+    isComponentView = false;
+    layoutMode = 'tree';
+    document.getElementById('view-select').value = 'dts';
+    document.getElementById('layout-select').value = 'tree';
+    document.getElementById('layout-select').style.display = 'none';
+    dtsTreeRoot = buildD3Data(parsedTree, '/', 0);
+    currentRoot = dtsTreeRoot;
+    collectPhandles(currentRoot);
+
+    renderTree(currentRoot);
+    renderLegend();
+
+    // Show phandle panel info
+    const phandelPanel = document.getElementById('phandle-panel');
+    const phandelList = document.getElementById('phandle-list');
+    if (allPhandles.length > 0) {
+      // Show unique targets
+      const targets = [...new Set(allPhandles.map(p => p.target))].sort();
+      phandelList.innerHTML = targets.slice(0, 50).map(t =>
+        `<span class="ref-item" data-target="${t}">&${t}</span>`
+      ).join('') + (targets.length > 50 ? `<span style="color:#8b949e"> +${targets.length - 50} more</span>` : '');
+      phandelPanel.classList.remove('hidden');
+
+      phandelList.querySelectorAll('.ref-item').forEach(el => {
+        el.addEventListener('click', () => navigateToLabel(el.dataset.target));
+      });
+    }
+  } catch (e) {
+    alert('Parse error: ' + e.message);
+    console.error(e);
+  }
+}
+
+// Event handlers
+document.getElementById('btn-parse').addEventListener('click', () => {
+  const src = document.getElementById('dts-textarea').value.trim();
+  if (!src) return;
+  doParse(src);
+});
+
+document.getElementById('btn-paste').addEventListener('click', () => {
+  document.getElementById('input-panel').classList.remove('hidden');
+  document.getElementById('tree-container').classList.add('hidden');
+  document.getElementById('props-panel').classList.add('hidden');
+  document.getElementById('phandle-panel').classList.add('hidden');
+});
+
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    doParse(ev.target.result);
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('search-input').addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => searchNodes(e.target.value), 200);
+});
+
+document.getElementById('btn-expand-all').addEventListener('click', () => {
+  if (!currentRoot) return;
+  expandAll(currentRoot);
+  refreshComponentView();
+});
+
+document.getElementById('btn-collapse').addEventListener('click', () => {
+  if (!currentRoot) return;
+  // First expand all, then collapse
+  expandAll(currentRoot);
+  collapseToDepth(currentRoot, 0, 2);
+  refreshComponentView();
+});
+
+document.getElementById('btn-phandles').addEventListener('click', () => {
+  showPhandles = !showPhandles;
+  const btn = document.getElementById('btn-phandles');
+  btn.style.background = showPhandles ? '#388bfd' : '';
+  if (!currentRoot) return;
+  if (!showPhandles) {
+    treeGroup.select('.phandle-links').selectAll('*').remove();
+    return;
+  }
+  if (layoutMode === 'block' && isComponentView) {
+    drawPhandlesBlock();
+  } else {
+    const hierarchy = d3.hierarchy(currentRoot, d => d.children);
+    drawPhandles(hierarchy.descendants());
+  }
+});
+
+function refreshComponentView() {
+  treeGroup.selectAll('.node, .block, .link').remove();
+  treeGroup.select('.phandle-links').selectAll('*').remove();
+  if (layoutMode === 'block' && isComponentView) {
+    renderBlockView(currentRoot);
+  } else {
+    updateTree(currentRoot);
+  }
+  renderLegend();
+  setTimeout(zoomToFit, 100);
+}
+
+document.getElementById('view-select').addEventListener('change', (e) => {
+  if (!dtsTreeRoot) { e.target.value = 'dts'; return; }
+  const view = e.target.value;
+  const wgLabel = document.getElementById('wg-toggle-label');
+  const wgToggle = document.getElementById('wg-toggle');
+  const layoutSel = document.getElementById('layout-select');
+
+  if (view === 'dts') {
+    isComponentView = false;
+    currentRoot = dtsTreeRoot;
+    wgLabel.style.display = 'none';
+    layoutSel.style.display = 'none';
+    layoutMode = 'tree'; // DTS view is tree-only
+  } else if (view === 'worldguard') {
+    isComponentView = true;
+    currentRoot = componentBuilders[view](dtsTreeRoot);
+    wgLabel.style.display = 'none';
+    layoutSel.style.display = '';
+  } else if (componentBuilders[view]) {
+    isComponentView = true;
+    currentRoot = componentBuilders[view](dtsTreeRoot);
+    wgLabel.style.display = 'flex';
+    layoutSel.style.display = '';
+    if (wgToggle.checked) {
+      const protMap = buildWGProtectionMap(dtsTreeRoot);
+      overlayWGProtection(currentRoot, protMap);
+    }
+  }
+
+  refreshComponentView();
+});
+
+document.getElementById('layout-select').addEventListener('change', (e) => {
+  if (!isComponentView || !currentRoot) return;
+  layoutMode = e.target.value === 'block' ? 'block' : 'tree';
+  refreshComponentView();
+});
+
+document.getElementById('wg-toggle').addEventListener('change', (e) => {
+  if (!currentRoot || !isComponentView) return;
+  const view = document.getElementById('view-select').value;
+  if (view === 'dts' || view === 'worldguard') return;
+
+  // Rebuild the component tree fresh to avoid stale overlay
+  currentRoot = componentBuilders[view](dtsTreeRoot);
+  if (e.target.checked) {
+    const protMap = buildWGProtectionMap(dtsTreeRoot);
+    overlayWGProtection(currentRoot, protMap);
+  }
+
+  refreshComponentView();
+});
+
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.key === '/' && !e.ctrlKey && !e.metaKey && document.activeElement !== document.getElementById('search-input') && document.activeElement !== document.getElementById('dts-textarea')) {
+    e.preventDefault();
+    document.getElementById('search-input').focus();
+  }
+  if (e.key === 'Escape') {
+    document.getElementById('search-input').value = '';
+    searchNodes('');
+    document.getElementById('search-input').blur();
+  }
+});
+</script>
+</body>
+</html>
