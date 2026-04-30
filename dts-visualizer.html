@@ -1005,37 +1005,58 @@ function renderBlockNode(node, parentX, parentY, group) {
     .attr('fill', colorInfo.color)
     .attr('stroke', colorInfo.color);
 
-  // Header label (truncate if too wide for block)
-  const maxChars = Math.max(8, Math.floor(node._w / 7));
+  // Approximate per-character widths (px) for the rendered system fonts.
+  const NAME_CHAR_W = 7.5;  // 12px bold (block-label)
+  const TAG_CHAR_W  = 5.8;  // 9.5px italic (block-tag)
+  const SUB_CHAR_W  = 6.5;  // 10px italic (block-sublabel)
+  const SIDE_PAD    = 10;   // matches text x-offset on both sides
+  const GAP_NAME_TAG = 10;  // breathing room between name and right-aligned tag
+
+  const tagText = node.label ? '&' + node.label : '';
+  const tagW = tagText.length * TAG_CHAR_W;
+
+  // Containers can fit name + tag on one row; leaves are too narrow, so the tag
+  // moves to its own row below the name to avoid overlap.
+  const sameRow = !isLeaf && tagText !== '';
+  const nameAvailW = sameRow
+    ? Math.max(40, node._w - SIDE_PAD * 2 - tagW - GAP_NAME_TAG)
+    : node._w - SIDE_PAD * 2;
+  const maxNameChars = Math.max(4, Math.floor(nameAvailW / NAME_CHAR_W));
+
   let label = node.name;
-  if (label.length > maxChars) label = label.substring(0, maxChars - 1) + '…';
+  if (label.length > maxNameChars) label = label.substring(0, maxNameChars - 1) + '…';
   g.append('text')
     .attr('class', 'block-label')
-    .attr('x', x + 10)
+    .attr('x', x + SIDE_PAD)
     .attr('y', y + 18)
     .text(label)
     .append('title')
     .text(node.label ? `${node.label}: ${node.name}` : node.name);
 
-  // Sublabel: phandle label, or compatible (leaf only), or child count
+  // Phandle tag: same row as name for containers (reserved space above), own row for leaves.
+  if (tagText) {
+    g.append('text')
+      .attr('class', 'block-tag')
+      .attr('x', x + node._w - SIDE_PAD)
+      .attr('y', sameRow ? y + 18 : y + 32)
+      .attr('text-anchor', 'end')
+      .text(tagText);
+  }
+
+  // Compatible sublabel (leaves only). Truncate independently — it owns the full inner width
+  // and is on its own row, so it never collides with the tag.
   const compatProp = (node.properties || []).find(p => p.name === 'compatible');
   const compatStr = compatProp ? compatProp.value.replace(/"/g, '').split(',')[0].trim() : '';
   if (isLeaf && compatStr) {
+    const subAvailW = node._w - SIDE_PAD * 2;
+    const maxSubChars = Math.max(6, Math.floor(subAvailW / SUB_CHAR_W));
     let sub = compatStr;
-    if (sub.length > maxChars) sub = sub.substring(0, maxChars - 1) + '…';
+    if (sub.length > maxSubChars) sub = sub.substring(0, maxSubChars - 1) + '…';
     g.append('text')
       .attr('class', 'block-sublabel')
-      .attr('x', x + 10)
-      .attr('y', y + 36)
+      .attr('x', x + SIDE_PAD)
+      .attr('y', y + (tagText ? 48 : 36))
       .text(sub);
-  }
-  if (node.label) {
-    g.append('text')
-      .attr('class', 'block-tag')
-      .attr('x', x + node._w - 10)
-      .attr('y', y + 18)
-      .attr('text-anchor', 'end')
-      .text('&' + node.label);
   }
 
   for (const k of kids) renderBlockNode(k, x, y, group);
