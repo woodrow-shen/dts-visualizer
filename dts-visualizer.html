@@ -19,10 +19,17 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 #main { display: flex; flex: 1; overflow: hidden; }
 #input-panel { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
 #input-panel.hidden { display: none; }
-#dts-textarea { width: 80%; max-width: 800px; height: 60%; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px; padding: 16px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; resize: none; }
+.dual-input { display: flex; gap: 16px; width: 88%; max-width: 1100px; height: 60%; }
+.input-col { display: flex; flex-direction: column; flex: 1 1 0; gap: 6px; min-width: 0; }
+.col-head { color: #8b949e; font-size: 12px; font-weight: 600; }
+#dts-textarea, #dts-textarea-b { flex: 1 1 auto; width: 100%; min-height: 0; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px; padding: 16px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; resize: none; }
+.upload-b { align-self: flex-start; background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+.upload-b:hover { background: #30363d; }
 #input-panel .actions { display: flex; gap: 12px; }
 #input-panel button { background: #238636; color: #fff; border: none; padding: 10px 24px; border-radius: 6px; font-size: 14px; cursor: pointer; }
 #input-panel button:hover { background: #2ea043; }
+#btn-diff { background: #1f6feb; }
+#btn-diff:hover { background: #388bfd; }
 #tree-container { flex: 1; overflow: hidden; position: relative; }
 #tree-container.hidden { display: none; }
 #tree-svg { width: 100%; height: 100%; }
@@ -84,6 +91,20 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 #legend.no-panel { right: 16px; }
 .legend-item { display: flex; align-items: center; gap: 4px; }
 .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+/* Diff mode coloring (overrides node-type colors when comparing two DTS) */
+.node.diff-added circle { fill: #3fb950; stroke: #3fb950; }
+.node.diff-removed circle { fill: #f85149; stroke: #f85149; }
+.node.diff-changed circle { fill: #d29922; stroke: #d29922; }
+.node.diff-added text { fill: #3fb950; }
+.node.diff-removed text { fill: #f85149; }
+.node.diff-unchanged { opacity: 0.45; }
+.block.diff-added > rect { fill: #3fb950; stroke: #3fb950; }
+.block.diff-removed > rect { fill: #f85149; stroke: #f85149; }
+.block.diff-changed > rect { fill: #d29922; stroke: #d29922; }
+.block.diff-unchanged { opacity: 0.5; }
+.prop-change-add { color: #3fb950; }
+.prop-change-del { color: #f85149; }
+.prop-change-mod { color: #d29922; }
 </style>
 </head>
 <body>
@@ -122,10 +143,22 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 <div id="main">
   <div id="input-panel">
     <h2 style="color:#58a6ff">DTS Visualizer</h2>
-    <p style="color:#8b949e">Paste Device Tree Source or upload a .dts file</p>
-    <textarea id="dts-textarea" placeholder="Paste your DTS content here...&#10;&#10;/dts-v1/;&#10;/ {&#10;    compatible = &quot;vendor,board&quot;;&#10;    ...&#10;};"></textarea>
+    <p style="color:#8b949e">Paste a single DTS to visualize, or two to compare (diff)</p>
+    <div class="dual-input">
+      <div class="input-col">
+        <label class="col-head">Original / Base (A)</label>
+        <textarea id="dts-textarea" placeholder="Paste your DTS content here...&#10;&#10;/dts-v1/;&#10;/ {&#10;    compatible = &quot;vendor,board&quot;;&#10;    ...&#10;};"></textarea>
+      </div>
+      <div class="input-col">
+        <label class="col-head">Modified (B) &mdash; optional, for diff</label>
+        <textarea id="dts-textarea-b" placeholder="Paste the modified DTS here, then click &quot;Compare A &rarr; B&quot;..."></textarea>
+        <label for="file-input-b" class="upload-b">Upload B .dts</label>
+        <input type="file" id="file-input-b" accept=".dts,.dtsi,.dtb,.txt" style="display:none">
+      </div>
+    </div>
     <div class="actions">
       <button id="btn-parse">Parse & Visualize</button>
+      <button id="btn-diff" title="Compare A and B and color-code the differences">Compare A &rarr; B</button>
     </div>
   </div>
 
@@ -536,6 +569,121 @@ function collectPhandles(node) {
   }
 }
 
+// ========== DIFF (compare two DTS) ==========
+// Unit-addressed key used to match nodes across the two trees.
+function nodeKey(n) { return n.address ? `${n.name}@${n.address}` : n.name; }
+
+// Compare two raw property arrays (objects from the parser) by name.
+// Returns { added, removed, changed:[{name, oldValue, newValue}] }.
+function diffProps(propsA, propsB) {
+  const a = new Map((propsA || []).map(p => [p.name, p]));
+  const b = new Map((propsB || []).map(p => [p.name, p]));
+  const added = [], removed = [], changed = [];
+  for (const [name, pb] of b) {
+    if (!a.has(name)) added.push(pb);
+    else if (a.get(name).value !== pb.value) changed.push({ name, oldValue: a.get(name).value, newValue: pb.value });
+  }
+  for (const [name, pa] of a) {
+    if (!b.has(name)) removed.push(pa);
+  }
+  return { added, removed, changed };
+}
+
+// Build one merged D3 node from the raw parsed nodes on each side (either may be null).
+// _diffStatus: 'added' (only B) | 'removed' (only A) | 'changed' | 'unchanged'.
+// _diffSelf marks a node whose OWN properties changed (vs. only a descendant).
+function buildDiffNode(rawA, rawB, path, depth) {
+  const src = rawB || rawA;            // prefer B (the "new" state); fall back to A for removed nodes
+  const fullName = src.address ? `${src.name}@${src.address}` : src.name;
+  const node = {
+    name: fullName,
+    label: src.label,
+    nodeType: classifyNode(src),
+    properties: src.properties,
+    _propsA: rawA ? rawA.properties : null,
+    _propsB: rawB ? rawB.properties : null,
+    children: [],
+    _collapsed: depth >= 2,
+    _path: path,
+    _origChildren: null,
+    _diffStatus: 'unchanged',
+    _diffSelf: false,
+    _propDiff: null,
+  };
+  totalNodes++;
+
+  const forced = !rawA ? 'added' : (!rawB ? 'removed' : null);
+
+  // Property-level diff only makes sense when the node exists on both sides.
+  if (rawA && rawB) {
+    const pd = diffProps(rawA.properties, rawB.properties);
+    if (pd.added.length || pd.removed.length || pd.changed.length) {
+      node._propDiff = pd;
+      node._diffSelf = true;
+    }
+  }
+
+  // Union of children, matched by key. Preserve B's order, then append A-only nodes.
+  const aKids = (rawA && rawA.children) || [];
+  const bKids = (rawB && rawB.children) || [];
+  const aMap = new Map(aKids.map(c => [nodeKey(c), c]));
+  const bMap = new Map(bKids.map(c => [nodeKey(c), c]));
+  const order = [];
+  const seen = new Set();
+  for (const c of bKids) { const k = nodeKey(c); order.push(k); seen.add(k); }
+  for (const c of aKids) { const k = nodeKey(c); if (!seen.has(k)) order.push(k); }
+
+  let childChanged = false;
+  for (const key of order) {
+    const ca = aMap.get(key) || null;
+    const cb = bMap.get(key) || null;
+    const childPath = path === '/' ? `/${key}` : `${path}/${key}`;
+    const child = buildDiffNode(ca, cb, childPath, depth + 1);
+    node.children.push(child);
+    if (child._diffStatus !== 'unchanged') childChanged = true;
+  }
+
+  // Resolve own status. Whole added/removed subtrees inherit naturally via recursion
+  // (one side is null all the way down).
+  if (forced) node._diffStatus = forced;
+  else if (node._diffSelf || childChanged) node._diffStatus = 'changed';
+  else node._diffStatus = 'unchanged';
+
+  // Collapse deep nodes by default, mirroring buildD3Data.
+  if (depth >= 2 && node.children.length > 0) {
+    node._origChildren = node.children;
+    node.children = null;
+  }
+  return node;
+}
+
+function buildDiffTree(rawA, rawB) {
+  totalNodes = 0;
+  return buildDiffNode(rawA, rawB, '/', 0);
+}
+
+// Stats line text. In diff mode it leads with the change counts.
+function statsText(visibleCount, unit) {
+  if (diffMode && currentRoot) {
+    const c = countDiff(currentRoot);
+    return `${c.added} added · ${c.removed} removed · ${c.changed} changed | ${totalNodes} nodes | ${visibleCount} ${unit}`;
+  }
+  return `${totalNodes} nodes total | ${visibleCount} ${unit}`;
+}
+
+// Tally diff status across the whole tree (independent of collapse state).
+function countDiff(root) {
+  const counts = { added: 0, removed: 0, changed: 0 };
+  (function walk(n) {
+    if (!n) return;
+    if (n._diffStatus === 'added') counts.added++;
+    else if (n._diffStatus === 'removed') counts.removed++;
+    else if (n._diffSelf) counts.changed++;
+    for (const c of (n.children || n._origChildren || [])) walk(c);
+  })(root);
+  return counts;
+}
+
 function renderTree(root) {
   const container = document.getElementById('tree-container');
   container.classList.remove('hidden');
@@ -568,7 +716,7 @@ function renderTree(root) {
 
   // Update stats
   const visibleCount = d3.selectAll('.node').size();
-  document.getElementById('stats').textContent = `${totalNodes} nodes total | ${visibleCount} visible`;
+  document.getElementById('stats').textContent = statsText(visibleCount, 'visible');
 }
 
 function updateTree(source) {
@@ -588,7 +736,7 @@ function updateTree(source) {
     .data(nodes, d => d.data._path);
 
   const nodeEnter = node.enter().append('g')
-    .attr('class', d => `node color-${d.data.nodeType}`)
+    .attr('class', d => `node color-${d.data.nodeType}${diffMode && d.data._diffStatus ? ' diff-' + d.data._diffStatus : ''}`)
     .attr('transform', d => vertical ? `translate(${d.x},${d.y})` : `translate(${d.y},${d.x})`)
     .on('click', (e, d) => {
       e.stopPropagation();
@@ -674,7 +822,7 @@ function updateTree(source) {
 
   // Update stats
   const visibleCount = nodes.length;
-  document.getElementById('stats').textContent = `${totalNodes} nodes total | ${visibleCount} visible`;
+  document.getElementById('stats').textContent = statsText(visibleCount, 'visible');
 }
 
 function toggleNode(d, root) {
@@ -744,6 +892,24 @@ function showProperties(data) {
   const childCount = (data.children || data._origChildren || []).length;
   html += `<div class="prop-row"><span class="prop-name">children</span><span class="prop-value">${childCount}</span></div>`;
   html += '</div>';
+
+  // Diff changes (only in diff mode)
+  if (diffMode && data._propDiff) {
+    const pd = data._propDiff;
+    html += '<div class="prop-section"><h4>Changes</h4>';
+    for (const c of pd.changed) {
+      html += `<div class="prop-row"><span class="prop-name prop-change-mod">~ ${escapeHtml(c.name)}</span><span class="prop-value"><span class="prop-change-del">${escapeHtml(c.oldValue)}</span> &rarr; <span class="prop-change-add">${escapeHtml(c.newValue)}</span></span></div>`;
+    }
+    for (const p of pd.added) {
+      html += `<div class="prop-row"><span class="prop-name prop-change-add">+ ${escapeHtml(p.name)}</span><span class="prop-value prop-change-add">${escapeHtml(p.value)}</span></div>`;
+    }
+    for (const p of pd.removed) {
+      html += `<div class="prop-row"><span class="prop-name prop-change-del">- ${escapeHtml(p.name)}</span><span class="prop-value prop-change-del">${escapeHtml(p.value)}</span></div>`;
+    }
+    html += '</div>';
+  } else if (diffMode && (data._diffStatus === 'added' || data._diffStatus === 'removed')) {
+    html += `<div class="prop-section"><h4>Changes</h4><div class="prop-row"><span class="prop-value prop-change-${data._diffStatus === 'added' ? 'add' : 'del'}">node ${data._diffStatus}</span></div></div>`;
+  }
 
   // Properties
   if (data.properties.length > 0) {
@@ -989,7 +1155,7 @@ function renderBlockNode(node, parentX, parentY, group) {
 
   const g = group.append('g')
     .datum(node)
-    .attr('class', `block color-${node.nodeType} ${isLeaf ? 'leaf' : 'container'}`)
+    .attr('class', `block color-${node.nodeType} ${isLeaf ? 'leaf' : 'container'}${diffMode && node._diffStatus ? ' diff-' + node._diffStatus : ''}`)
     .attr('data-path', node._path)
     .on('click', (e) => {
       e.stopPropagation();
@@ -1074,7 +1240,7 @@ function renderBlockView(root) {
   if (showPhandles) drawPhandlesBlock();
 
   const visibleCount = treeGroup.selectAll('.block').size();
-  document.getElementById('stats').textContent = `${totalNodes} nodes total | ${visibleCount} blocks`;
+  document.getElementById('stats').textContent = statsText(visibleCount, 'blocks');
 }
 
 // Pick edge anchor points based on relative position of two blocks.
@@ -1323,6 +1489,16 @@ function searchNodes(query) {
 // ========== LEGEND ==========
 function renderLegend() {
   const legend = document.getElementById('legend');
+  if (diffMode) {
+    legend.innerHTML = '';
+    for (const [color, label] of [['#3fb950', 'Added'], ['#f85149', 'Removed'], ['#d29922', 'Changed'], ['#8b949e', 'Unchanged']]) {
+      const item = document.createElement('span');
+      item.className = 'legend-item';
+      item.innerHTML = `<span class="legend-dot" style="background:${color}"></span>${label}`;
+      legend.appendChild(item);
+    }
+    return;
+  }
   const usedTypes = new Set();
   function collectTypes(node) {
     usedTypes.add(node.nodeType);
@@ -2082,6 +2258,7 @@ const componentBuilders = {
 let isComponentView = false;
 let dtsTreeRoot = null;
 let layoutMode = 'tree'; // 'tree' | 'block'
+let diffMode = false; // true when comparing two DTS sources
 
 // ========== MAIN ==========
 let currentRoot = null;
@@ -2093,6 +2270,7 @@ function doParse(src) {
     labelMap = parser.labels;
     totalNodes = 0;
     allPhandles = [];
+    diffMode = false;
     isComponentView = false;
     layoutMode = 'tree';
     document.getElementById('view-select').value = 'dts';
@@ -2126,11 +2304,52 @@ function doParse(src) {
   }
 }
 
+// Compare two DTS sources and render a single merged, color-coded tree.
+function doDiff(srcA, srcB) {
+  try {
+    const rawA = new DTSParser(srcA).parse();
+    const rawB = new DTSParser(srcB).parse();
+    labelMap = {};
+    allPhandles = [];
+    diffMode = true;
+    isComponentView = false;
+    layoutMode = 'tree';
+    document.getElementById('view-select').value = 'dts';
+    document.getElementById('layout-select').value = 'tree';
+    document.getElementById('layout-select').style.display = 'none';
+    dtsTreeRoot = buildDiffTree(rawA, rawB);
+    currentRoot = dtsTreeRoot;
+    collectPhandles(currentRoot);
+
+    renderTree(currentRoot);
+    renderLegend();
+    document.getElementById('phandle-panel').classList.add('hidden');
+  } catch (e) {
+    alert('Diff parse error: ' + e.message);
+    console.error(e);
+  }
+}
+
 // Event handlers
 document.getElementById('btn-parse').addEventListener('click', () => {
   const src = document.getElementById('dts-textarea').value.trim();
   if (!src) return;
   doParse(src);
+});
+
+document.getElementById('btn-diff').addEventListener('click', () => {
+  const a = document.getElementById('dts-textarea').value.trim();
+  const b = document.getElementById('dts-textarea-b').value.trim();
+  if (!a || !b) { alert('Provide both Base (A) and Modified (B) DTS to compare.'); return; }
+  doDiff(a, b);
+});
+
+document.getElementById('file-input-b').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => { document.getElementById('dts-textarea-b').value = ev.target.result; };
+  reader.readAsText(file);
 });
 
 document.getElementById('btn-paste').addEventListener('click', () => {

@@ -232,6 +232,78 @@ test('block layout is hidden in DTS view and restored when re-entering a compone
   assert.notEqual(await layoutSel.evaluate(el => el.style.display), 'none');
 });
 
+// ===== Diff mode =====
+const DIFF_BASE_A = `/dts-v1/;
+/ {
+    compatible = "test,board";
+    cpus {
+        cpu@0 { reg = <0>; status = "okay"; };
+        cpu@1 { reg = <1>; };
+    };
+    soc {
+        uart@0 { reg = <0x100>; };
+    };
+};
+`;
+
+const DIFF_MOD_B = `/dts-v1/;
+/ {
+    compatible = "test,board";
+    cpus {
+        cpu@0 { reg = <0>; status = "disabled"; };
+        cpu@1 { reg = <1>; };
+        cpu@2 { reg = <2>; };
+    };
+    soc {
+    };
+};
+`;
+
+async function enterDiffMode() {
+  await page.click('#btn-paste');
+  await page.waitForSelector('#input-panel:not(.hidden)');
+  await page.fill('#dts-textarea', DIFF_BASE_A);
+  await page.fill('#dts-textarea-b', DIFF_MOD_B);
+  await page.click('#btn-diff');
+  await page.waitForSelector('#tree-container:not(.hidden)');
+  await page.click('#btn-expand-all');
+  await page.waitForFunction(() => document.querySelectorAll('.node').length > 4);
+}
+
+test('diff mode color-codes added, removed, and changed nodes', async () => {
+  await enterDiffMode();
+
+  const added = page.locator('.node.diff-added', { hasText: 'cpu@2' });
+  const removed = page.locator('.node.diff-removed', { hasText: 'uart@0' });
+  const changed = page.locator('.node.diff-changed', { hasText: 'cpu@0' });
+  const unchanged = page.locator('.node.diff-unchanged', { hasText: 'cpu@1' });
+
+  assert.equal(await added.count(), 1, 'cpu@2 should be marked added');
+  assert.equal(await removed.count(), 1, 'uart@0 should be marked removed');
+  assert.equal(await changed.count(), 1, 'cpu@0 (status okay->disabled) should be marked changed');
+  assert.equal(await unchanged.count(), 1, 'cpu@1 should be marked unchanged');
+  assert.deepEqual(pageErrors, [], `unexpected page errors: ${pageErrors.map(e => e.message).join('; ')}`);
+});
+
+test('diff mode stats report added/removed/changed counts', async () => {
+  await enterDiffMode();
+  const stats = await page.locator('#stats').textContent();
+  assert.match(stats, /1 added/);
+  assert.match(stats, /1 removed/);
+  assert.match(stats, /1 changed/);
+});
+
+test('diff mode props panel shows per-property old -> new changes', async () => {
+  await enterDiffMode();
+  await page.locator('.node.diff-changed', { hasText: 'cpu@0' }).first().click();
+  await page.waitForFunction(() => /Changes/.test(document.getElementById('props-content')?.textContent || ''));
+  const content = await page.locator('#props-content').textContent();
+  assert.match(content, /Changes/);
+  assert.match(content, /status/);
+  assert.match(content, /okay/);
+  assert.match(content, /disabled/);
+});
+
 test('clicking a phandle ref in the props panel navigates to the target', async () => {
   await page.click('#btn-expand-all');
   await page.waitForFunction(() => document.querySelectorAll('.node').length > 10);
