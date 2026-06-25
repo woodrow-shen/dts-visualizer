@@ -91,17 +91,11 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 #legend.no-panel { right: 16px; }
 .legend-item { display: flex; align-items: center; gap: 4px; }
 .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
-/* Diff mode coloring (overrides node-type colors when comparing two DTS) */
-.node.diff-added circle { fill: #3fb950; stroke: #3fb950; }
-.node.diff-removed circle { fill: #f85149; stroke: #f85149; }
-.node.diff-changed circle { fill: #d29922; stroke: #d29922; }
-.node.diff-added text { fill: #3fb950; }
-.node.diff-removed text { fill: #f85149; }
-.node.diff-unchanged { opacity: 0.45; }
-.block.diff-added > rect { fill: #3fb950; stroke: #3fb950; }
-.block.diff-removed > rect { fill: #f85149; stroke: #f85149; }
-.block.diff-changed > rect { fill: #d29922; stroke: #d29922; }
-.block.diff-unchanged { opacity: 0.5; }
+/* Diff mode: highlight the node NAME by change type, leaving the node body
+   in its normal node-type color. Unchanged names keep the default style. */
+.node.diff-added .name-text, .block.diff-added .block-label { fill: #3fb950; font-weight: 700; }
+.node.diff-removed .name-text, .block.diff-removed .block-label { fill: #f85149; font-weight: 700; text-decoration: line-through; }
+.node.diff-changed .name-text, .block.diff-changed .block-label { fill: #d29922; font-weight: 700; }
 .prop-change-add { color: #3fb950; }
 .prop-change-del { color: #f85149; }
 .prop-change-mod { color: #d29922; }
@@ -757,6 +751,7 @@ function updateTree(source) {
   if (vertical) {
     // Vertical: text below node, centered
     nodeEnter.append('text')
+      .attr('class', 'name-text')
       .attr('dy', '1.6em')
       .attr('x', 0)
       .attr('text-anchor', 'middle')
@@ -778,6 +773,7 @@ function updateTree(source) {
   } else {
     // Horizontal: text left/right of node
     nodeEnter.append('text')
+      .attr('class', 'name-text')
       .attr('dy', '0.35em')
       .attr('x', d => (d.data.children || d.data._origChildren) ? -10 : 10)
       .attr('text-anchor', d => (d.data.children || d.data._origChildren) ? 'end' : 'start')

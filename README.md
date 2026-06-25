@@ -40,7 +40,7 @@ This tool builds that structure for you, in the browser, with no setup.
 
 **Diff mode** — compare two DTS visually
 - Paste a base DTS in **(A)** and a modified one in **(B)**, then click **Compare A → B**
-- Renders one merged tree (union of both files) color-coded **green = added**, **red = removed**, **yellow = changed**, dimmed = unchanged
+- Renders one merged tree (union of both files); each node keeps its normal type color, and the **node name** is highlighted by change type — **green = added**, **red = removed (struck through)**, **yellow = changed**, plain = unchanged
 - Detects both structural changes (added/removed nodes) and property-level changes (added/removed/modified values)
 - Click a changed node → properties panel shows a **Changes** section with each property's `old → new` value
 - Stats line summarizes `N added · M removed · K changed`
