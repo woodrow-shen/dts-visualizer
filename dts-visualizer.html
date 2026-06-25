@@ -1486,11 +1486,27 @@ function searchNodes(query) {
 function renderLegend() {
   const legend = document.getElementById('legend');
   if (diffMode) {
+    // Diff legend. The node body keeps its normal type color; only the node NAME
+    // is highlighted, so render each entry as a styled sample of the name itself
+    // (not a color dot) to avoid confusion with the node-type color legend.
     legend.innerHTML = '';
-    for (const [color, label] of [['#3fb950', 'Added'], ['#f85149', 'Removed'], ['#d29922', 'Changed'], ['#8b949e', 'Unchanged']]) {
+    const head = document.createElement('span');
+    head.className = 'legend-item';
+    head.innerHTML = '<strong style="color:#8b949e">Diff &mdash; node-name highlight (node body keeps its type color):</strong>';
+    legend.appendChild(head);
+    const samples = [
+      ['#3fb950', 'added', 'new node, only in B'],
+      ['#f85149', 'removed', 'deleted, only in A', 'line-through'],
+      ['#d29922', 'changed', 'same node, properties differ'],
+      ['#c9d1d9', 'unchanged', 'identical on both sides', 'plain'],
+    ];
+    for (const [color, label, desc, deco] of samples) {
       const item = document.createElement('span');
       item.className = 'legend-item';
-      item.innerHTML = `<span class="legend-dot" style="background:${color}"></span>${label}`;
+      const weight = deco === 'plain' ? '400' : '700';
+      const td = deco === 'line-through' ? 'line-through' : 'none';
+      item.innerHTML = `<span style="color:${color};font-weight:${weight};text-decoration:${td}">${label}</span>` +
+        `<span style="color:#8b949e">&ndash; ${desc}</span>`;
       legend.appendChild(item);
     }
     return;
